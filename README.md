@@ -111,6 +111,8 @@ answer, which is the thing to watch for if something is waiting on the review.
 | `Alt` + any of the above | Same, while the page itself has keyboard focus |
 | `F12` | Developer tools for the pane |
 
+Set `RORSHACH_DEBUG=1` to print item loads, highlight results and answers to stdout.
+
 ## How the pane is sandboxed
 
 The reviewed content runs in its own Electron `WebContentsView` with the Chromium

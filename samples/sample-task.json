@@ -12,9 +12,9 @@
   "items": [
     {
       "id": "example-domain",
-      "header": "Does the page heading say “Example Domain”?",
-      "detail": "The highlight should land on the heading.",
-      "pane": { "kind": "url", "src": "https://example.com/", "focus": "Example Domain" }
+      "header": "Does the English paragraph mention documentation examples?",
+      "detail": "The highlight should land on the first paragraph.",
+      "pane": { "kind": "url", "src": "https://example.com/", "focus": "documentation examples" }
     },
     {
       "id": "wikipedia-electron",

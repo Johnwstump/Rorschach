@@ -24,6 +24,8 @@ let lastHighlight = null;
 let paneState = { loading: false, url: '', title: '', error: null };
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+// RORSHACH_DEBUG=1 prints item loads and highlight results to stdout.
+const debug = process.env.RORSHACH_DEBUG ? (...a) => console.log('[rorshach]', ...a) : () => {};
 
 // ---------- arguments ----------
 
@@ -107,7 +109,7 @@ function createWindow() {
   wc.on('page-title-updated', (_e, title) => sendPane({ title }));
   wc.on('did-finish-load', () => { runHighlight(); });
   wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
-    if (isMainFrame && code !== -3) sendPane({ loading: false, error: `${desc} (${code})`, url });
+    if (isMainFrame && code !== -3) { debug('load failed', url, desc, code); sendPane({ loading: false, error: `${desc} (${code})`, url }); }
   });
   // Alt+<key> works even while the page has keyboard focus.
   wc.on('before-input-event', (event, input) => {
@@ -184,6 +186,7 @@ async function showItem(i, { force = false } = {}) {
   highlightRun++;
   const url = resolveTarget(item);
   const wc = pane.webContents;
+  debug('item', index + 1, 'of', task.items.length, item.id, '->', url);
   if (force || wc.getURL() !== url) {
     sendPane({ loading: true, error: null, url, title: '' });
     wc.loadURL(url).catch(() => {});
@@ -201,12 +204,13 @@ async function runHighlight() {
   if (!focus) { lastHighlight = { found: null }; sendState(); return; }
   for (let t = 0; t < HIGHLIGHT_TRIES && run === highlightRun; t++) {
     let res = null;
-    try { res = await pane.webContents.executeJavaScript(highlightScript(focus), true); } catch { res = null; }
+    try { res = await pane.webContents.executeJavaScript(highlightScript(focus), true); } catch (e) { debug('highlight script error:', e.message); res = null; }
+    if (t === 0) debug('highlight first try', item.id, JSON.stringify(res));
     if (run !== highlightRun) return;
-    if (res && res.found) { lastHighlight = res; sendState(); return; }
+    if (res && res.found) { lastHighlight = res; debug('highlight', item.id, 'found', JSON.stringify(res.text)); sendState(); return; }
     await delay(HIGHLIGHT_DELAY_MS);
   }
-  if (run === highlightRun) { lastHighlight = { found: false, focus }; sendState(); }
+  if (run === highlightRun) { lastHighlight = { found: false, focus }; debug('highlight', item.id, 'NOT found:', focus); sendState(); }
 }
 
 async function openTask(file, resultsFile) {
@@ -230,6 +234,7 @@ ipcMain.on('panel-ready', () => { sendState(); sendPane({}); });
 ipcMain.on('answer', (_e, { value, label, note }) => {
   const item = currentItem();
   if (!item) return;
+  debug('answer', item.id, '=', value);
   results.answer(item.id, { value, label, note: note || '', index });
   let next = firstUnansweredFrom(index + 1);
   if (next === -1) next = firstUnansweredFrom(0);
