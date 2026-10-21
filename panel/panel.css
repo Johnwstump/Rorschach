@@ -23,6 +23,7 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); overflow: hidden; }
 .app { height: 100%; display: grid; grid-template-rows: auto 1fr auto; }
@@ -79,3 +80,14 @@ textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; 
 
 .hints { padding: 8px 16px; border-top: 1px solid var(--line); background: var(--surface); display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.75rem; color: var(--muted); }
 .hints b { color: var(--ink); font-weight: 600; }
+
+/* Viewport switcher */
+.vp { display: grid; gap: 6px; }
+.vp-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.vp-head .label { font-size: 0.85rem; color: var(--muted); }
+.vp-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
+.vp-buttons button { padding: 4px 9px; font-size: 0.82rem; }
+.vp-buttons button.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.vp-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.85rem; }
+.vp-custom input[type="number"] { width: 5.5em; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
+.vp-custom label { display: inline-flex; align-items: center; gap: 4px; }

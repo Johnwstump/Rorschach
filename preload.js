@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('rorshach', {
   nav: (to) => ipcRenderer.send('nav', to),
   openExternal: () => ipcRenderer.send('open-external'),
   rehighlight: () => ipcRenderer.send('rehighlight'),
+  viewport: (req) => ipcRenderer.send('viewport', req),
   reload: () => ipcRenderer.send('reload'),
   revealResults: () => ipcRenderer.send('reveal-results'),
   openTask: () => ipcRenderer.send('open-task'),
