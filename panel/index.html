@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <title>Rorshach</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <header class="top">
+      <div class="title-row">
+        <h1 id="task-title">Loading task…</h1>
+        <button id="open-task" class="ghost small" title="Open another task file">Open…</button>
+      </div>
+      <div class="progress" aria-label="Progress">
+        <div class="bar"><div id="bar-fill" class="fill"></div></div>
+        <span id="progress-text" class="mono">—</span>
+      </div>
+    </header>
+
+    <section id="item" class="item" hidden>
+      <p class="eyebrow"><span id="item-index" class="mono"></span> <span id="item-id" class="mono muted"></span></p>
+      <h2 id="item-header"></h2>
+      <p id="item-detail" class="detail"></p>
+
+      <div class="pane-row">
+        <span id="pane-kind" class="chip"></span>
+        <span id="highlight-status" class="chip"></span>
+        <span id="pane-loading" class="chip loading" hidden>loading…</span>
+      </div>
+      <p id="pane-url" class="url mono" title=""></p>
+      <p id="pane-error" class="error" hidden></p>
+
+      <div id="options" class="options" role="group" aria-label="Answers"></div>
+
+      <label id="note-wrap" class="note-wrap" for="note">
+        <span class="label">Note <span class="muted">(N)</span></span>
+        <textarea id="note" rows="3" placeholder="Optional"></textarea>
+      </label>
+
+      <p id="answered" class="answered" hidden></p>
+
+      <div class="nav">
+        <button id="back" class="ghost" title="Back (Backspace)">← Back</button>
+        <button id="skip" class="ghost" title="Skip for now (→)">Skip →</button>
+        <span class="spacer"></span>
+        <button id="rehighlight" class="ghost" title="Find the highlight again (H)">Find</button>
+        <button id="reload" class="ghost" title="Reload the pane (R)">Reload</button>
+        <button id="open-external" class="ghost" title="Open in your browser (O)">Browser</button>
+      </div>
+    </section>
+
+    <section id="done" class="done" hidden>
+      <h2>All items answered</h2>
+      <div id="summary" class="summary"></div>
+      <p class="muted small-text">Results file:</p>
+      <p id="results-path" class="mono url"></p>
+      <div class="nav">
+        <button id="reveal" class="primary">Show results file</button>
+        <button id="review-again" class="ghost">Go to first item</button>
+      </div>
+    </section>
+
+    <footer class="hints">
+      <span><b>1–9</b> answer</span><span><b>N</b> note</span><span><b>⌫</b> back</span><span><b>→</b> skip</span><span><b>H</b> find</span><span><b>R</b> reload</span><span><b>O</b> browser</span><span><b>Alt+key</b> while the page has focus</span>
+    </footer>
+  </div>
+  <script src="panel.js"></script>
+</body>
+</html>

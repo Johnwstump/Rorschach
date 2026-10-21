@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Image</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #111; color: #ddd; font: 13px system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: 1fr auto; }
+    .stage { overflow: auto; display: grid; place-items: center; }
+    img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
+    img.full { max-width: none; max-height: none; cursor: zoom-out; }
+    .caption { padding: 8px 12px; background: #1c1c1c; border-top: 1px solid #333; }
+    .caption:empty { display: none; }
+    .missing { color: #f0a0a0; padding: 24px; }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage"></div>
+  <div class="caption" id="caption"></div>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const src = q.get('src');
+    const stage = document.getElementById('stage');
+    document.getElementById('caption').textContent = q.get('caption') || '';
+    if (!src) {
+      stage.innerHTML = '<p class="missing">No image given.</p>';
+    } else {
+      const img = new Image();
+      img.alt = q.get('caption') || 'Image under review';
+      img.onerror = () => { stage.innerHTML = '<p class="missing">Could not load ' + src.replace(/[<>&]/g, '') + '</p>'; };
+      img.onclick = () => img.classList.toggle('full');
+      img.src = src;
+      stage.appendChild(img);
+    }
+  </script>
+</body>
+</html>

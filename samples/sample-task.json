@@ -1,0 +1,37 @@
+{
+  "title": "Sample review",
+  "description": "Three items that show the pane kinds and the highlight. Run with: npm run sample",
+  "defaults": {
+    "options": [
+      { "label": "Looks right", "value": "ok", "key": "1" },
+      { "label": "Something's off", "value": "problem", "key": "2" },
+      { "label": "Can't tell", "value": "unsure", "key": "3" }
+    ],
+    "note": true
+  },
+  "items": [
+    {
+      "id": "example-domain",
+      "header": "Does the page heading say “Example Domain”?",
+      "detail": "The highlight should land on the heading.",
+      "pane": { "kind": "url", "src": "https://example.com/", "focus": "Example Domain" }
+    },
+    {
+      "id": "wikipedia-electron",
+      "header": "Find the infobox row for the initial release",
+      "detail": "A partial match on a table header highlights the value cell next to it.",
+      "pane": { "kind": "url", "src": "https://en.wikipedia.org/wiki/Electron_(software_framework)", "focus": "Initial release" },
+      "options": [
+        { "label": "Found it", "value": "found" },
+        { "label": "Not there", "value": "missing" }
+      ]
+    },
+    {
+      "id": "image-example",
+      "header": "An image item",
+      "detail": "pane.src can be a local path relative to this task file, or an http(s) URL. Click the image to toggle 1:1.",
+      "pane": { "kind": "image", "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Electron_Software_Framework_Logo.svg/512px-Electron_Software_Framework_Logo.svg.png", "caption": "Electron logo, from Wikimedia Commons" },
+      "note": false
+    }
+  ]
+}

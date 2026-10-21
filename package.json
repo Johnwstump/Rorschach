@@ -1,0 +1,37 @@
+{
+  "name": "rorshach",
+  "version": "0.1.0",
+  "description": "A review station: walk through a queue of web pages or images, answer a question about each, and write the answers to a file.",
+  "main": "main.js",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "sample": "electron . samples/sample-task.json",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "dev.rorshach.app",
+    "productName": "Rorshach",
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**",
+      "panel/**",
+      "viewer/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}

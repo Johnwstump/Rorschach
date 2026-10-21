@@ -1,0 +1,7 @@
+node_modules/
+dist/
+local/
+*.results.json
+*.results.json.tmp
+.DS_Store
+Thumbs.db
