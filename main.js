@@ -7,6 +7,7 @@ const { pathToFileURL } = require('node:url');
 const { loadTask } = require('./lib/task');
 const { Results } = require('./lib/results');
 const { highlightScript } = require('./lib/highlight');
+const { PRESETS, CYCLE, isFit, normalizeViewport, layoutFor, mobileUserAgent, describe } = require('./lib/viewport');
 
 const PANEL_WIDTH = 420;
 const HIGHLIGHT_TRIES = 12;      // pages that render late get a few chances
@@ -22,6 +23,17 @@ let index = 0;
 let highlightRun = 0;            // bumped whenever a new item loads, so stale retries stop
 let lastHighlight = null;
 let paneState = { loading: false, url: '', title: '', error: null };
+
+// Viewport: `undefined` follows the task file, `null` is "fit", an object is a fixed size.
+let viewportOverride = undefined;
+let currentScale = 1;
+let emulating = false;
+let defaultUserAgent = '';
+// Chromium crashes if device emulation is enabled before the pane has ever started a
+// load, so the wanted emulation is parked here until the first did-start-loading.
+let rendererLive = false;
+let wantedEmulation = { vp: null, scale: 1 };
+const SNAPSHOT_DIR = process.env.RORSHACH_SNAPSHOT_DIR || null;
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 // RORSHACH_DEBUG=1 prints item loads and highlight results to stdout.
@@ -89,13 +101,9 @@ function createWindow() {
 
   win.contentView.addChildView(panel);
   win.contentView.addChildView(pane);
+  defaultUserAgent = pane.webContents.getUserAgent();
 
-  const layout = () => {
-    const { width, height } = win.getContentBounds();
-    panel.setBounds({ x: 0, y: 0, width: PANEL_WIDTH, height });
-    pane.setBounds({ x: PANEL_WIDTH, y: 0, width: Math.max(0, width - PANEL_WIDTH), height });
-  };
-  win.on('resize', layout);
+  win.on('resize', () => layout());
   layout();
   win.on('closed', () => { win = null; });
 
@@ -104,7 +112,11 @@ function createWindow() {
     wc.loadURL(url).catch(() => {});       // popups stay in the pane
     return { action: 'deny' };
   });
-  wc.on('did-start-loading', () => sendPane({ loading: true, error: null }));
+  wc.on('did-start-loading', () => {
+    rendererLive = true;
+    applyEmulation();
+    sendPane({ loading: true, error: null });
+  });
   wc.on('did-stop-loading', () => sendPane({ loading: false, url: wc.getURL(), title: wc.getTitle() }));
   wc.on('page-title-updated', (_e, title) => sendPane({ title }));
   wc.on('did-finish-load', () => { runHighlight(); });
@@ -130,6 +142,115 @@ function createWindow() {
 function sendPane(patch) {
   paneState = { ...paneState, ...patch };
   if (panel) panel.webContents.send('pane', paneState);
+}
+
+// ---------- viewport ----------
+
+function effectiveViewport() {
+  if (viewportOverride !== undefined) return viewportOverride;
+  const item = currentItem();
+  return item ? item.pane.viewport : null;
+}
+
+// Places the panel and the pane, and tells Chromium what size the page should
+// believe it is. Returns true when the user agent changed, which only takes effect
+// on the next load, so the caller should reload the pane.
+function layout() {
+  if (!win) return false;
+  const { width, height } = win.getContentBounds();
+  panel.setBounds({ x: 0, y: 0, width: PANEL_WIDTH, height });
+  const area = { x: PANEL_WIDTH, y: 0, width: Math.max(0, width - PANEL_WIDTH), height };
+  const vp = effectiveViewport();
+  const { bounds, scale } = layoutFor(vp, area);
+  pane.setBounds(bounds);
+  currentScale = scale;
+  wantedEmulation = { vp, scale };
+  if (rendererLive) applyEmulation();
+
+  const wc = pane.webContents;
+  const wantUA = vp && vp.mobile ? mobileUserAgent(process.versions.chrome) : defaultUserAgent;
+  const uaChanged = wc.getUserAgent() !== wantUA;
+  if (uaChanged) wc.setUserAgent(wantUA);
+  debug('viewport', describe(vp, scale), JSON.stringify(bounds), uaChanged ? '(user agent changed)' : '');
+  return uaChanged;
+}
+
+// Device metrics go through the DevTools protocol rather than
+// webContents.enableDeviceEmulation, because the latter ignores a page's viewport
+// meta tag in mobile mode and lays everything out at 980px. This is the same call
+// DevTools device mode makes.
+async function applyEmulation() {
+  const { vp, scale } = wantedEmulation;
+  const dbg = pane.webContents.debugger;
+  try {
+    if (isFit(vp)) {
+      if (emulating) {
+        await dbg.sendCommand('Emulation.clearDeviceMetricsOverride');
+        await dbg.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
+        emulating = false;
+      }
+      return;
+    }
+    if (!dbg.isAttached()) dbg.attach('1.3');
+    await dbg.sendCommand('Emulation.setDeviceMetricsOverride', {
+      width: vp.width,
+      height: vp.height,
+      deviceScaleFactor: vp.dpr || 0,
+      mobile: Boolean(vp.mobile),
+      scale,
+    });
+    await dbg.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: Boolean(vp.mobile), maxTouchPoints: 5 });
+    emulating = true;
+  } catch (e) {
+    debug('emulation failed:', e.message);
+  }
+}
+
+function setViewport(req) {
+  if (!task) return;
+  const before = effectiveViewport();
+  if (!req || req.mode === 'task') viewportOverride = undefined;
+  else if (req.mode === 'preset') viewportOverride = normalizeViewport(req.name);
+  else if (req.mode === 'custom') viewportOverride = normalizeViewport({ width: req.width, height: req.height, mobile: req.mobile });
+  else if (req.mode === 'cycle') {
+    // task -> fit -> desktop -> tablet -> phone -> task
+    const cur = viewportOverride === undefined ? -1 : CYCLE.indexOf(viewportOverride ? viewportOverride.name : 'fit');
+    const next = cur + 1;
+    viewportOverride = next >= CYCLE.length ? undefined : normalizeViewport(CYCLE[next]);
+  }
+  const after = effectiveViewport();
+  const uaChanged = layout();
+  const mobileFlipped = Boolean(before && before.mobile) !== Boolean(after && after.mobile);
+  if (uaChanged || mobileFlipped) showItem(index, { force: true });
+  else { highlightRun++; runHighlight(); sendState(); }
+}
+
+function viewportState() {
+  const item = currentItem();
+  const vp = effectiveViewport();
+  return {
+    source: viewportOverride === undefined ? 'task' : 'override',
+    effective: vp,
+    scale: currentScale,
+    text: describe(vp, currentScale),
+    task: item ? (item.pane.viewport ? item.pane.viewport.name : 'fit') : 'fit',
+    presets: Object.values(PRESETS).map((p) => ({ name: p.name, label: p.label })),
+  };
+}
+
+async function snapshot(item) {
+  if (!SNAPSHOT_DIR) return;
+  try {
+    const fs = require('node:fs');
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    let img;
+    try { img = await pane.webContents.capturePage(); } catch { await delay(400); img = await pane.webContents.capturePage(); }
+    const file = path.join(SNAPSHOT_DIR, `${item.id}.png`);
+    fs.writeFileSync(file, img.toPNG());
+    debug('snapshot', file, `${img.getSize().width}x${img.getSize().height}`);
+    const ui = await panel.webContents.capturePage();
+    fs.writeFileSync(path.join(SNAPSHOT_DIR, `${item.id}.panel.png`), ui.toPNG());
+  } catch (e) { debug('snapshot failed', e.message); }
 }
 
 // ---------- task flow ----------
@@ -160,6 +281,7 @@ function sendState() {
     resultsFile: results.file,
     highlight: lastHighlight,
     pane: paneState,
+    viewport: viewportState(),
   });
 }
 
@@ -186,8 +308,9 @@ async function showItem(i, { force = false } = {}) {
   highlightRun++;
   const url = resolveTarget(item);
   const wc = pane.webContents;
+  const uaChanged = layout();
   debug('item', index + 1, 'of', task.items.length, item.id, '->', url);
-  if (force || wc.getURL() !== url) {
+  if (force || uaChanged || wc.getURL() !== url) {
     sendPane({ loading: true, error: null, url, title: '' });
     wc.loadURL(url).catch(() => {});
   } else {
@@ -207,10 +330,21 @@ async function runHighlight() {
     try { res = await pane.webContents.executeJavaScript(highlightScript(focus), true); } catch (e) { debug('highlight script error:', e.message); res = null; }
     if (t === 0) debug('highlight first try', item.id, JSON.stringify(res));
     if (run !== highlightRun) return;
-    if (res && res.found) { lastHighlight = res; debug('highlight', item.id, 'found', JSON.stringify(res.text)); sendState(); return; }
+    if (res && res.found) { lastHighlight = res; debug('highlight', item.id, 'found', JSON.stringify(res.text)); sendState(); await probe(item); return; }
     await delay(HIGHLIGHT_DELAY_MS);
   }
-  if (run === highlightRun) { lastHighlight = { found: false, focus }; debug('highlight', item.id, 'NOT found:', focus); sendState(); }
+  if (run === highlightRun) { lastHighlight = { found: false, focus }; debug('highlight', item.id, 'NOT found:', focus); sendState(); await probe(item); }
+}
+
+// Debug only: report what the page believes about its viewport, and save a snapshot.
+async function probe(item) {
+  if (!process.env.RORSHACH_DEBUG) return;
+  try {
+    const r = await pane.webContents.executeJavaScript(
+      '({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio, coarse: matchMedia("(pointer: coarse)").matches, ua: navigator.userAgent.slice(0, 70) })', true);
+    debug('page sees', JSON.stringify(r));
+  } catch (e) { debug('probe failed', e.message); }
+  await snapshot(item);
 }
 
 async function openTask(file, resultsFile) {
@@ -235,7 +369,11 @@ ipcMain.on('answer', (_e, { value, label, note }) => {
   const item = currentItem();
   if (!item) return;
   debug('answer', item.id, '=', value);
-  results.answer(item.id, { value, label, note: note || '', index });
+  const vp = effectiveViewport();
+  const viewport = vp
+    ? { name: vp.name, width: vp.width, height: vp.height, mobile: vp.mobile, scale: Math.round(currentScale * 1000) / 1000 }
+    : { name: 'fit' };
+  results.answer(item.id, { value, label, note: note || '', index, viewport });
   let next = firstUnansweredFrom(index + 1);
   if (next === -1) next = firstUnansweredFrom(0);
   if (next === -1) { results.finish(); sendState(); return; }
@@ -262,6 +400,9 @@ ipcMain.on('open-external', () => {
   if (/^https?:/i.test(url)) shell.openExternal(url);
 });
 ipcMain.on('rehighlight', () => { highlightRun++; runHighlight(); });
+ipcMain.on('viewport', (_e, req) => {
+  try { setViewport(req); } catch (e) { debug('viewport rejected', e.message); sendState(); }
+});
 ipcMain.on('reload', () => showItem(index, { force: true }));
 ipcMain.on('reveal-results', () => { if (results) shell.showItemInFolder(results.file); });
 ipcMain.on('open-task', async () => {

@@ -70,9 +70,27 @@ review resumes at the first unanswered item.
 | `items[].pane.src` | A URL, or a path relative to the task file. |
 | `items[].pane.focus` | Text to find on the page. The first visible match is highlighted and scrolled into view; when the match is a label (`<dt>`, `<th>`, `<label>`), the value next to it is highlighted too. Optional. |
 | `items[].pane.caption` | Caption under an image. Optional. |
+| `items[].pane.viewport` | The size the page should believe it has: a preset name (`fit`, `desktop` 1440×900, `laptop` 1280×800, `tablet` 820×1180, `phone` 390×844) or `{ "width": 390, "height": 844, "mobile": true }`. Falls back to `defaults.viewport`, then `fit`. See below. |
 | `items[].options` | Answer buttons. Strings, or objects with `label`, `value` and `key` (the hotkey). Falls back to `defaults.options`, then to Yes / No / Can't tell. |
 | `items[].note` | Whether to show the free-text note box. Falls back to `defaults.note`, then `true`. |
 | `items[].meta` | Anything you want carried through untouched. Optional. |
+
+## Viewports
+
+By default the pane fills the space beside the panel and the page sees that size
+(`fit`). A fixed viewport makes Chromium emulate that size instead, the way the
+device mode in developer tools does: the page lays out at the requested width, media
+queries fire for it, and `mobile` adds the mobile layout viewport (the page's
+`<meta name="viewport">` is honored, as on a phone), touch events and a mobile user
+agent. When the requested size is larger than the space available, the
+whole page is scaled down to fit and the panel shows the percentage.
+
+Set it per item with `pane.viewport`, for the whole task with `defaults.viewport`, or
+on the fly with the Viewport buttons in the panel (`V` cycles Task → Fit → Desktop →
+Tablet → Phone). The viewport in effect is recorded with each answer.
+
+This is a layout check, not a device: you get Chromium's rendering at that size with
+a borrowed user agent, not Safari, native fonts or a site's app redirects.
 
 ## Results file
 
@@ -88,6 +106,7 @@ review resumes at the first unanswered item.
   "answers": {
     "milton-inside-width": {
       "value": "error", "label": "Real error", "note": "Should be 23.", "index": 0,
+      "viewport": { "name": "fit" },
       "at": "2026-10-21T15:02:30.000Z"
     }
   }
@@ -108,10 +127,13 @@ answer, which is the thing to watch for if something is waiting on the review.
 | `H` | Run the highlight again (for pages that render late) |
 | `R` | Reload the pane |
 | `O` | Open the current page in your default browser |
+| `V` | Cycle the viewport: task setting, fit, desktop, tablet, phone |
 | `Alt` + any of the above | Same, while the page itself has keyboard focus |
 | `F12` | Developer tools for the pane |
 
-Set `RORSHACH_DEBUG=1` to print item loads, highlight results and answers to stdout.
+Set `RORSHACH_DEBUG=1` to print item loads, highlight results, what the page reports
+about its viewport, and answers to stdout. Add `RORSHACH_SNAPSHOT_DIR=<folder>` to
+also save a PNG of the pane for each item once its highlight settles.
 
 ## How the pane is sandboxed
 

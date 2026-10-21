@@ -32,6 +32,17 @@
       <p id="pane-url" class="url mono" title=""></p>
       <p id="pane-error" class="error" hidden></p>
 
+      <div class="vp" role="group" aria-label="Viewport">
+        <div class="vp-head"><span class="label">Viewport <span class="muted">(V)</span></span><span id="vp-status" class="chip"></span></div>
+        <div id="vp-buttons" class="vp-buttons"></div>
+        <form id="vp-custom" class="vp-custom" hidden>
+          <input id="vp-w" type="number" min="100" max="8000" placeholder="W" aria-label="Width"><span>×</span>
+          <input id="vp-h" type="number" min="100" max="8000" placeholder="H" aria-label="Height">
+          <label><input id="vp-mobile" type="checkbox"> mobile</label>
+          <button type="submit" class="small">Apply</button>
+        </form>
+      </div>
+
       <div id="options" class="options" role="group" aria-label="Answers"></div>
 
       <label id="note-wrap" class="note-wrap" for="note">
@@ -63,7 +74,7 @@
     </section>
 
     <footer class="hints">
-      <span><b>1–9</b> answer</span><span><b>N</b> note</span><span><b>⌫</b> back</span><span><b>→</b> skip</span><span><b>H</b> find</span><span><b>R</b> reload</span><span><b>O</b> browser</span><span><b>Alt+key</b> while the page has focus</span>
+      <span><b>1–9</b> answer</span><span><b>N</b> note</span><span><b>⌫</b> back</span><span><b>→</b> skip</span><span><b>H</b> find</span><span><b>R</b> reload</span><span><b>O</b> browser</span><span><b>V</b> viewport</span><span><b>Alt+key</b> while the page has focus</span>
     </footer>
   </div>
   <script src="panel.js"></script>

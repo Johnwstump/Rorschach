@@ -13,8 +13,8 @@
     {
       "id": "example-domain",
       "header": "Does the English paragraph mention documentation examples?",
-      "detail": "The highlight should land on the first paragraph.",
-      "pane": { "kind": "url", "src": "https://example.com/", "focus": "documentation examples" }
+      "detail": "This item asks for the phone viewport: the page renders at 390×844 as a mobile browser, scaled to fit. Press V to cycle viewports.",
+      "pane": { "kind": "url", "src": "https://example.com/", "focus": "documentation examples", "viewport": "phone" }
     },
     {
       "id": "wikipedia-electron",

@@ -40,6 +40,7 @@ function render() {
   else { hs.hidden = false; hs.className = 'chip bad'; hs.textContent = `not found: “${item.pane.focus}”`; }
 
   renderPane(pane);
+  renderViewport(state.viewport);
 
   const opts = $('options');
   opts.innerHTML = item.options.map((o) =>
@@ -75,6 +76,32 @@ function renderPane(pane) {
   $('pane-error').textContent = pane.error ? `The pane could not load this: ${pane.error}` : '';
 }
 
+let customOpen = false;
+
+function renderViewport(vp) {
+  if (!vp) return;
+  const status = $('vp-status');
+  status.textContent = vp.text;
+  status.className = `chip${vp.effective && vp.scale < 0.995 ? ' warn' : ''}`;
+  status.title = vp.effective && vp.scale < 0.995 ? 'Scaled down to fit. Widen the window for 100%.' : '';
+
+  const selected = vp.source === 'task' ? 'task' : (vp.effective ? vp.effective.name : 'fit');
+  const buttons = [
+    { name: 'task', label: `Task (${vp.task})` },
+    ...vp.presets.map((p) => ({ name: p.name, label: p.label })),
+    { name: 'custom', label: 'Custom' },
+  ];
+  $('vp-buttons').innerHTML = buttons.map((b) =>
+    `<button type="button" data-vp="${esc(b.name)}" class="${b.name === selected || (b.name === 'custom' && customOpen) ? 'selected' : ''}">${esc(b.label)}</button>`).join('');
+
+  $('vp-custom').hidden = !customOpen;
+  if (customOpen && vp.effective && !$('vp-w').value) {
+    $('vp-w').value = vp.effective.width;
+    $('vp-h').value = vp.effective.height;
+    $('vp-mobile').checked = Boolean(vp.effective.mobile);
+  }
+}
+
 function renderDone() {
   const counts = {};
   // state.answered is a number; the breakdown comes from the labels we have seen.
@@ -94,9 +121,10 @@ function submit(value, label) {
 function handleKey(key, fromPage) {
   if (!state || !state.item) return;
   const k = key.toLowerCase();
-  const inNote = !fromPage && document.activeElement === $('note');
-  if (inNote) {
-    if (k === 'escape') $('note').blur();
+  const el = document.activeElement;
+  const typing = !fromPage && el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT');
+  if (typing) {
+    if (k === 'escape') el.blur();
     return;
   }
   const opt = state.item.options.find((o) => o.key === k);
@@ -108,6 +136,7 @@ function handleKey(key, fromPage) {
     case 'h': api.rehighlight(); return true;
     case 'r': api.reload(); return true;
     case 'o': api.openExternal(); return true;
+    case 'v': api.viewport({ mode: 'cycle' }); return true;
     default: return false;
   }
 }
@@ -121,6 +150,21 @@ document.addEventListener('click', (e) => {
   const opt = e.target.closest('.option');
   if (opt) { submit(opt.dataset.value, opt.dataset.label); return; }
   if (e.target.id === 'clear-answer') { api.clearAnswer(); return; }
+  const vp = e.target.closest('[data-vp]');
+  if (vp) {
+    const name = vp.dataset.vp;
+    if (name === 'custom') { customOpen = !customOpen; renderViewport(state.viewport); if (customOpen) $('vp-w').focus(); return; }
+    customOpen = false;
+    api.viewport(name === 'task' ? { mode: 'task' } : { mode: 'preset', name });
+  }
+});
+
+$('vp-custom').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const width = Number($('vp-w').value), height = Number($('vp-h').value);
+  if (!width || !height) return;
+  api.viewport({ mode: 'custom', width, height, mobile: $('vp-mobile').checked });
+  $('vp-w').blur();
 });
 
 $('back').addEventListener('click', () => api.nav('back'));
