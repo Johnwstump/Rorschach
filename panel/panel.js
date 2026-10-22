@@ -31,11 +31,13 @@ function render() {
   $('item-header').textContent = item.header;
   $('item-detail').textContent = item.detail;
   $('item-detail').hidden = !item.detail;
-  $('pane-kind').textContent = item.pane.kind;
+  $('pane-kind').textContent = item.pane.kind === 'compare' ? `compare · ${item.pane.sources.length} sources` : item.pane.kind;
+  renderCompare(state.compare);
 
   const hs = $('highlight-status');
   if (!item.pane.focus) { hs.hidden = true; }
   else if (!highlight) { hs.hidden = false; hs.className = 'chip'; hs.textContent = `looking for “${item.pane.focus}”…`; }
+  else if (highlight.compare) { hs.hidden = false; hs.className = `chip ${highlight.found ? 'ok' : 'bad'}`; hs.textContent = highlight.text; hs.title = ''; }
   else if (highlight.found) { hs.hidden = false; hs.className = 'chip ok'; hs.textContent = `found: ${highlight.text || item.pane.focus}`; hs.title = highlight.exact ? 'Exact match' : 'Partial match'; }
   else { hs.hidden = false; hs.className = 'chip bad'; hs.textContent = `not found: “${item.pane.focus}”`; }
 
@@ -67,13 +69,31 @@ function render() {
 
 function renderPane(pane) {
   if (!pane) return;
-  $('pane-loading').hidden = !pane.loading;
+  const isCompare = state && state.item && state.item.pane.kind === 'compare';
+  $('pane-loading').hidden = isCompare || !pane.loading;
   const u = $('pane-url');
-  const shown = pane.url && pane.url.startsWith('file:') && pane.url.includes('/viewer/image.html') ? decodeURIComponent((pane.url.split('src=')[1] || '').split('&')[0]) : pane.url || '';
+  const shown = isCompare ? '' : pane.url && pane.url.startsWith('file:') && pane.url.includes('/viewer/image.html') ? decodeURIComponent((pane.url.split('src=')[1] || '').split('&')[0]) : pane.url || '';
   u.textContent = shown;
   u.title = shown;
-  $('pane-error').hidden = !pane.error;
+  u.hidden = isCompare;
+  $('pane-error').hidden = isCompare || !pane.error;
   $('pane-error').textContent = pane.error ? `The pane could not load this: ${pane.error}` : '';
+}
+
+function renderCompare(c) {
+  $('cmp').hidden = !c;
+  if (!c) return;
+  const status = $('cmp-status');
+  if (c.loaded < c.n) { status.className = 'chip loading'; status.textContent = `loading ${c.loaded}/${c.n}`; }
+  else if (c.blend) { status.className = 'chip ok'; status.textContent = `${c.mode} · captured ${c.capturedAt ? new Date(c.capturedAt).toLocaleTimeString() : ''}`; }
+  else { status.className = 'chip'; status.textContent = c.mode === 'grid' ? 'live grid' : `${c.mode} · capturing…`; }
+  const modes = [['grid', 'Grid', 'G'], ['fade', 'Fade', 'F'], ['wipe', 'Wipe', 'W']];
+  $('cmp-buttons').innerHTML = modes.map(([m, label, k]) =>
+    `<button type="button" data-cmp-mode="${m}" class="${c.mode === m ? 'selected' : ''}" title="${label} (${k})">${label}</button>`).join('') +
+    `<button type="button" data-cmp-sync="1" class="toggle${c.sync ? ' on' : ''}" title="Scroll every cell together (S)">Sync scroll</button>` +
+    `<button type="button" data-cmp-recapture="1" title="Capture the pages again (C)">Recapture</button>`;
+  $('cmp-sources').innerHTML = c.sources.map((s) =>
+    `<li><b>${esc(s.letter)}</b><span title="${esc(s.src)}">${esc(s.label)} <span class="src">${esc(s.src)}</span></span></li>`).join('');
 }
 
 let customOpen = false;
@@ -137,6 +157,11 @@ function handleKey(key, fromPage) {
     case 'r': api.reload(); return true;
     case 'o': api.openExternal(); return true;
     case 'v': api.viewport({ mode: 'cycle' }); return true;
+    case 'g': case 'f': case 'w':
+      if (state.compare) api.compare({ action: 'mode', mode: { g: 'grid', f: 'fade', w: 'wipe' }[k] });
+      return true;
+    case 's': if (state.compare) api.compare({ action: 'sync', on: !state.compare.sync }); return true;
+    case 'c': if (state.compare) api.compare({ action: 'recapture' }); return true;
     default: return false;
   }
 }
@@ -150,6 +175,10 @@ document.addEventListener('click', (e) => {
   const opt = e.target.closest('.option');
   if (opt) { submit(opt.dataset.value, opt.dataset.label); return; }
   if (e.target.id === 'clear-answer') { api.clearAnswer(); return; }
+  const cm = e.target.closest('[data-cmp-mode]');
+  if (cm) { api.compare({ action: 'mode', mode: cm.dataset.cmpMode }); return; }
+  if (e.target.closest('[data-cmp-sync]')) { api.compare({ action: 'sync', on: !(state.compare && state.compare.sync) }); return; }
+  if (e.target.closest('[data-cmp-recapture]')) { api.compare({ action: 'recapture' }); return; }
   const vp = e.target.closest('[data-vp]');
   if (vp) {
     const name = vp.dataset.vp;

@@ -12,16 +12,20 @@
     .caption { padding: 8px 12px; background: #1c1c1c; border-top: 1px solid #333; }
     .caption:empty { display: none; }
     .missing { color: #f0a0a0; padding: 24px; }
+    .badge { position: absolute; top: 8px; left: 8px; padding: 3px 8px; border-radius: 4px; background: rgba(20,24,29,0.85); color: #fff; font-weight: 600; font-size: 12px; }
+    .badge b { color: #8cb4f0; margin-right: 4px; }
   </style>
 </head>
 <body>
   <div class="stage" id="stage"></div>
+  <div class="badge" id="badge" hidden></div>
   <div class="caption" id="caption"></div>
   <script>
     const q = new URLSearchParams(location.search);
     const src = q.get('src');
     const stage = document.getElementById('stage');
     document.getElementById('caption').textContent = q.get('caption') || '';
+    if (q.get('badge')) { const b = document.getElementById('badge'); b.innerHTML = '<b></b>'; b.firstChild.textContent = q.get('badge'); b.append(q.get('label') || ''); b.hidden = false; }
     if (!src) {
       stage.innerHTML = '<p class="missing">No image given.</p>';
     } else {

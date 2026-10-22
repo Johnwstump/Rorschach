@@ -18,13 +18,27 @@
     },
     {
       "id": "wikipedia-electron",
-      "header": "Find the infobox row for the initial release",
+      "header": "Find the infobox row for the stable release",
       "detail": "A partial match on a table header highlights the value cell next to it.",
-      "pane": { "kind": "url", "src": "https://en.wikipedia.org/wiki/Electron_(software_framework)", "focus": "Initial release" },
+      "pane": { "kind": "url", "src": "https://en.wikipedia.org/wiki/Electron_(software_framework)", "focus": "Stable release" },
       "options": [
         { "label": "Found it", "value": "found" },
         { "label": "Not there", "value": "missing" }
       ]
+    },
+    {
+      "id": "wikipedia-desktop-vs-mobile",
+      "header": "Which Wikipedia layout reads better for this article?",
+      "detail": "Two live pages. G shows them side by side with synced scrolling (S toggles it); F crossfades captures of them; W puts a draggable divider between the captures. The answer buttons are the sources.",
+      "pane": {
+        "kind": "compare",
+        "mode": "grid",
+        "focus": "Stable release",
+        "sources": [
+          { "label": "Desktop site", "src": "https://en.wikipedia.org/wiki/Electron_(software_framework)" },
+          { "label": "Mobile site", "src": "https://en.m.wikipedia.org/wiki/Electron_(software_framework)" }
+        ]
+      }
     },
     {
       "id": "image-example",

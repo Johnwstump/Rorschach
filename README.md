@@ -66,14 +66,58 @@ review resumes at the first unanswered item.
 | `items[].id` | Unique id, used as the key in the results file. Defaults to `item-N`. |
 | `items[].header` | The question or claim, shown large. |
 | `items[].detail` | Supporting text. Optional. |
-| `items[].pane.kind` | `url` (a live page), `image` (a picture), or `snapshot` (a saved `.html` or `.mhtml`). |
-| `items[].pane.src` | A URL, or a path relative to the task file. |
+| `items[].pane.kind` | `url` (a live page), `image` (a picture), `snapshot` (a saved `.html` or `.mhtml`), or `compare` (several of those together; see below). |
+| `items[].pane.src` | A URL, or a path relative to the task file. Not used by `compare`. |
+| `items[].pane.sources` | `compare` only: 2–6 sources, each `{ "label", "kind", "src" }`. `kind` defaults to `image` for image file names and `url` otherwise; `label` defaults to the letter. |
+| `items[].pane.mode` | `compare` only: the starting mode, `grid` (default), `fade` or `wipe`. `defaults.mode` sets it for the task. |
 | `items[].pane.focus` | Text to find on the page. The first visible match is highlighted and scrolled into view; when the match is a label (`<dt>`, `<th>`, `<label>`), the value next to it is highlighted too. Optional. |
 | `items[].pane.caption` | Caption under an image. Optional. |
 | `items[].pane.viewport` | The size the page should believe it has: a preset name (`fit`, `desktop` 1440×900, `laptop` 1280×800, `tablet` 820×1180, `phone` 390×844) or `{ "width": 390, "height": 844, "mobile": true }`. Falls back to `defaults.viewport`, then `fit`. See below. |
 | `items[].options` | Answer buttons. Strings, or objects with `label`, `value` and `key` (the hotkey). Falls back to `defaults.options`, then to Yes / No / Can't tell. |
 | `items[].note` | Whether to show the free-text note box. Falls back to `defaults.note`, then `true`. |
 | `items[].meta` | Anything you want carried through untouched. Optional. |
+
+## Comparing sources
+
+A `compare` item shows two to six sources together, and its answer buttons are the
+sources themselves (`A · Current`, `B · Proposed`, …, plus "No preference") unless the
+item spells out its own `options`.
+
+```json
+{
+  "id": "hero-redesign",
+  "header": "Which hero reads better on first glance?",
+  "pane": {
+    "kind": "compare",
+    "mode": "wipe",
+    "viewport": "phone",
+    "sources": [
+      { "label": "Current", "src": "https://example.com/" },
+      { "label": "Proposed", "src": "mockups/hero-v2.png" }
+    ]
+  }
+}
+```
+
+Three ways to look at them, switchable at any time:
+
+| Mode | Key | What you see |
+|---|---|---|
+| **Grid** | `G` | Every source live in its own cell, laid out to give the largest cells (2 side by side, 4 in a square, 6 in three columns). Pages scroll, and with **Sync scroll** on (`S`) they scroll together. Each cell carries its letter. |
+| **Fade** | `F` | Captures of the cells in one frame with a crossfade slider. With more than two sources the slider walks A→B→C, fading between neighbours. `Space` blinks to the next source outright, which is the quickest way to spot a difference. |
+| **Wipe** | `W` | The same captures with a draggable divider; left of it is A, right of it is B. With more sources there are more dividers, each region showing the next source, so three mockups can be compared in one strip. `Tab` picks a divider, `←` `→` nudge it. |
+
+Fade and wipe work on captures taken when you switch into them, at whatever scroll
+position the grid was at, so scroll the grid to the part you care about first. `C` or
+**Recapture** takes them again. Live pages are captured at the full
+size of the stage, and every source is drawn at the same scale, so like compares with
+like. An image source smaller than the captures sits centred in the frame, which suits
+fade; in wipe it can fall entirely inside one region, so wipe works best when the
+sources match in size. The
+viewport setting applies to every cell, so two sites can be compared at phone size.
+
+The answer records the mode in use and, for fade and wipe, the slider or divider
+positions.
 
 ## Viewports
 
@@ -128,6 +172,10 @@ answer, which is the thing to watch for if something is waiting on the review.
 | `R` | Reload the pane |
 | `O` | Open the current page in your default browser |
 | `V` | Cycle the viewport: task setting, fit, desktop, tablet, phone |
+| `G` / `F` / `W` | Compare items: grid, fade or wipe |
+| `S` | Compare items: toggle synced scrolling in the grid |
+| `C` | Compare items: capture the pages again for fade and wipe |
+| `Space`, `←` `→`, `Tab` | In fade or wipe: blink to the next source, move the slider or divider, pick the next divider |
 | `Alt` + any of the above | Same, while the page itself has keyboard focus |
 | `F12` | Developer tools for the pane |
 

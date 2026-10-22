@@ -91,3 +91,11 @@ textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; 
 .vp-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.85rem; }
 .vp-custom input[type="number"] { width: 5.5em; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
 .vp-custom label { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Compare controls */
+.cmp-sources { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 0.82rem; }
+.cmp-sources li { display: grid; grid-template-columns: 1.4rem 1fr; gap: 6px; min-width: 0; }
+.cmp-sources b { color: var(--accent); }
+.cmp-sources span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp-sources .src { color: var(--muted); font-family: var(--mono); font-size: 0.78rem; }
+.vp-buttons button.toggle.on { background: var(--mark); border-color: var(--accent); }

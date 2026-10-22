@@ -2,42 +2,58 @@
 
 const { app, BaseWindow, WebContentsView, ipcMain, shell, dialog, nativeTheme } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 
 const { loadTask } = require('./lib/task');
 const { Results } = require('./lib/results');
 const { highlightScript } = require('./lib/highlight');
 const { PRESETS, CYCLE, isFit, normalizeViewport, layoutFor, mobileUserAgent, describe } = require('./lib/viewport');
+const { LETTERS, GAP, gridLayout } = require('./lib/compare');
 
 const PANEL_WIDTH = 420;
 const HIGHLIGHT_TRIES = 12;      // pages that render late get a few chances
 const HIGHLIGHT_DELAY_MS = 600;
+const PANE_PARTITION = 'persist:rorshach-pane';
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+// RORSHACH_DEBUG=1 prints item loads, highlight results and answers to stdout.
+const debug = process.env.RORSHACH_DEBUG ? (...a) => console.log('[rorshach]', ...a) : () => {};
+const SNAPSHOT_DIR = process.env.RORSHACH_SNAPSHOT_DIR || null;
 
 let win = null;
-let panel = null;   // the control panel (our UI)
-let pane = null;    // the thing being reviewed (a page, an image, a snapshot)
+let panel = null;      // the control panel (our UI)
+let pane = null;       // a single item's page, image or snapshot
+let overlay = null;    // the blend view for compare items (fade / wipe)
+const cells = [];      // pooled views for compare items, one per source
+let overlayReady = false;
 
 let task = null;
 let results = null;
 let index = 0;
 let highlightRun = 0;            // bumped whenever a new item loads, so stale retries stop
-let lastHighlight = null;
+let lastHighlight = null;        // single: a result; compare: { cells: [result] }
 let paneState = { loading: false, url: '', title: '', error: null };
 
 // Viewport: `undefined` follows the task file, `null` is "fit", an object is a fixed size.
 let viewportOverride = undefined;
 let currentScale = 1;
-let emulating = false;
 let defaultUserAgent = '';
-// Chromium crashes if device emulation is enabled before the pane has ever started a
-// load, so the wanted emulation is parked here until the first did-start-loading.
-let rendererLive = false;
-let wantedEmulation = { vp: null, scale: 1 };
-const SNAPSHOT_DIR = process.env.RORSHACH_SNAPSHOT_DIR || null;
 
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-// RORSHACH_DEBUG=1 prints item loads and highlight results to stdout.
-const debug = process.env.RORSHACH_DEBUG ? (...a) => console.log('[rorshach]', ...a) : () => {};
+// Compare: state for the current compare item, or null.
+let compare = null;
+let modeOverride = undefined;    // the mode the user picked; resets when the task changes modes
+let lastTaskMode = null;
+
+// Per-webContents bookkeeping: whether its renderer has ever started a load (Chromium
+// crashes if device emulation is enabled before that), what emulation it should have,
+// whether the DevTools protocol is wired up, and a scroll-sync echo guard.
+const wcState = new WeakMap();
+function stateOf(wc) {
+  let s = wcState.get(wc);
+  if (!s) { s = { live: false, emulating: false, bound: false, wanted: { vp: null, scale: 1 }, applied: null }; wcState.set(wc, s); }
+  return s;
+}
 
 // ---------- arguments ----------
 
@@ -67,7 +83,47 @@ async function pickTaskFile() {
   return r.canceled ? null : r.filePaths[0];
 }
 
-// ---------- window ----------
+// ---------- views ----------
+
+// A view for third-party content: no preload, no Node, sandboxed, and a persistent
+// session shared by all of them so logins survive between runs.
+function createContentView(cellIndex) {
+  const view = new WebContentsView({
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, partition: PANE_PARTITION },
+  });
+  const wc = view.webContents;
+  const st = stateOf(wc);
+  const isPane = cellIndex < 0;
+
+  wc.setWindowOpenHandler(({ url }) => {
+    wc.loadURL(url).catch(() => {});       // popups stay in the view
+    return { action: 'deny' };
+  });
+  wc.on('did-start-loading', () => {
+    st.live = true;
+    applyEmulation(wc);
+    if (isPane) sendPane({ loading: true, error: null });
+  });
+  wc.on('did-stop-loading', () => { if (isPane) sendPane({ loading: false, url: wc.getURL(), title: wc.getTitle() }); });
+  wc.on('page-title-updated', (_e, title) => { if (isPane) sendPane({ title }); });
+  wc.on('did-finish-load', () => { onLoaded(wc, cellIndex); });
+  wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    if (!isMainFrame || code === -3) return;
+    debug('load failed', url, desc, code);
+    if (isPane) sendPane({ loading: false, error: `${desc} (${code})`, url });
+  });
+  // Alt+<key> works even while the page has keyboard focus.
+  wc.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.alt || input.control || input.meta) return;
+    panel.webContents.send('hotkey', input.key);
+    event.preventDefault();
+  });
+  wc.debugger.on('message', (_e, method, params) => {
+    if (method === 'Runtime.bindingCalled' && params.name === '__rorshachScroll') onCellScroll(cellIndex, params.payload);
+  });
+  wc.debugger.on('detach', () => { st.emulating = false; st.bound = false; });
+  return view;
+}
 
 function createWindow() {
   win = new BaseWindow({
@@ -80,63 +136,42 @@ function createWindow() {
   });
 
   panel = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-
-  // The pane shows third-party content. It gets no preload, no Node, a sandbox,
-  // and its own persistent session so logins survive between runs.
-  pane = new WebContentsView({
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      partition: 'persist:rorshach-pane',
-    },
+  pane = createContentView(-1);
+  overlay = new WebContentsView({
+    webPreferences: { preload: path.join(__dirname, 'viewer', 'compare-preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
 
   win.contentView.addChildView(panel);
   win.contentView.addChildView(pane);
+  win.contentView.addChildView(overlay);
+  overlay.setVisible(false);
   defaultUserAgent = pane.webContents.getUserAgent();
 
   win.on('resize', () => layout());
   layout();
   win.on('closed', () => { win = null; });
 
-  const wc = pane.webContents;
-  wc.setWindowOpenHandler(({ url }) => {
-    wc.loadURL(url).catch(() => {});       // popups stay in the pane
-    return { action: 'deny' };
-  });
-  wc.on('did-start-loading', () => {
-    rendererLive = true;
-    applyEmulation();
-    sendPane({ loading: true, error: null });
-  });
-  wc.on('did-stop-loading', () => sendPane({ loading: false, url: wc.getURL(), title: wc.getTitle() }));
-  wc.on('page-title-updated', (_e, title) => sendPane({ title }));
-  wc.on('did-finish-load', () => { runHighlight(); });
-  wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
-    if (isMainFrame && code !== -3) { debug('load failed', url, desc, code); sendPane({ loading: false, error: `${desc} (${code})`, url }); }
-  });
-  // Alt+<key> works even while the page has keyboard focus.
-  wc.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || !input.alt || input.control || input.meta) return;
-    panel.webContents.send('hotkey', input.key);
-    event.preventDefault();
-  });
-
   panel.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && input.key === 'F12') {
-      pane.webContents.toggleDevTools();
+      (compare && compare.blend ? overlay : compare ? cells[0] : pane).webContents.toggleDevTools();
       event.preventDefault();
     }
   });
   panel.webContents.loadFile(path.join(__dirname, 'panel', 'index.html'));
+  overlay.webContents.loadFile(path.join(__dirname, 'viewer', 'compare.html'));
+}
+
+// Cells are created on demand and kept; the overlay is re-added so it stays on top.
+function ensureCells(n) {
+  while (cells.length < n) {
+    const view = createContentView(cells.length);
+    cells.push(view);
+    win.contentView.addChildView(view);
+  }
+  win.contentView.removeChildView(overlay);
+  win.contentView.addChildView(overlay);
 }
 
 function sendPane(patch) {
@@ -144,7 +179,7 @@ function sendPane(patch) {
   if (panel) panel.webContents.send('pane', paneState);
 }
 
-// ---------- viewport ----------
+// ---------- viewport and emulation ----------
 
 function effectiveViewport() {
   if (viewportOverride !== undefined) return viewportOverride;
@@ -152,58 +187,92 @@ function effectiveViewport() {
   return item ? item.pane.viewport : null;
 }
 
-// Places the panel and the pane, and tells Chromium what size the page should
-// believe it is. Returns true when the user agent changed, which only takes effect
-// on the next load, so the caller should reload the pane.
+async function ensureDebugger(wc) {
+  const st = stateOf(wc);
+  if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); st.bound = false; }
+  if (st.bound) return;
+  st.bound = true;
+  try {
+    await wc.debugger.sendCommand('Runtime.enable');
+    await wc.debugger.sendCommand('Runtime.addBinding', { name: '__rorshachScroll' });
+  } catch (e) { debug('binding failed:', e.message); }
+}
+
+// Device metrics go through the DevTools protocol rather than
+// webContents.enableDeviceEmulation, because the latter ignores a page's viewport
+// meta tag in mobile mode and lays everything out at 980px.
+async function applyEmulation(wc) {
+  const st = stateOf(wc);
+  if (!st.live) return;
+  const { vp, scale } = st.wanted;
+  try {
+    if (isFit(vp)) {
+      if (st.emulating) {
+        await wc.debugger.sendCommand('Emulation.clearDeviceMetricsOverride');
+        await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
+        st.emulating = false;
+      }
+      return;
+    }
+    await ensureDebugger(wc);
+    await wc.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
+      width: vp.width, height: vp.height, deviceScaleFactor: vp.dpr || 0, mobile: Boolean(vp.mobile), scale,
+    });
+    await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: Boolean(vp.mobile), maxTouchPoints: 5 });
+    st.emulating = true;
+  } catch (e) {
+    debug('emulation failed:', e.message);
+  }
+}
+
+// Records what a view should emulate and sets its user agent. Returns true when the
+// user agent changed, which only takes effect on the next load.
+function setViewportFor(wc, vp, scale) {
+  const st = stateOf(wc);
+  st.wanted = { vp, scale };
+  if (st.live) applyEmulation(wc);
+  const wantUA = vp && vp.mobile ? mobileUserAgent(process.versions.chrome) : defaultUserAgent;
+  const changed = wc.getUserAgent() !== wantUA;
+  if (changed) wc.setUserAgent(wantUA);
+  return changed;
+}
+
+// Places every view. Returns true when a user agent changed and the caller should reload.
 function layout() {
   if (!win) return false;
   const { width, height } = win.getContentBounds();
   panel.setBounds({ x: 0, y: 0, width: PANEL_WIDTH, height });
   const area = { x: PANEL_WIDTH, y: 0, width: Math.max(0, width - PANEL_WIDTH), height };
   const vp = effectiveViewport();
-  const { bounds, scale } = layoutFor(vp, area);
-  pane.setBounds(bounds);
-  currentScale = scale;
-  wantedEmulation = { vp, scale };
-  if (rendererLive) applyEmulation();
+  let uaChanged = false;
 
-  const wc = pane.webContents;
-  const wantUA = vp && vp.mobile ? mobileUserAgent(process.versions.chrome) : defaultUserAgent;
-  const uaChanged = wc.getUserAgent() !== wantUA;
-  if (uaChanged) wc.setUserAgent(wantUA);
-  debug('viewport', describe(vp, scale), JSON.stringify(bounds), uaChanged ? '(user agent changed)' : '');
-  return uaChanged;
-}
-
-// Device metrics go through the DevTools protocol rather than
-// webContents.enableDeviceEmulation, because the latter ignores a page's viewport
-// meta tag in mobile mode and lays everything out at 980px. This is the same call
-// DevTools device mode makes.
-async function applyEmulation() {
-  const { vp, scale } = wantedEmulation;
-  const dbg = pane.webContents.debugger;
-  try {
-    if (isFit(vp)) {
-      if (emulating) {
-        await dbg.sendCommand('Emulation.clearDeviceMetricsOverride');
-        await dbg.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
-        emulating = false;
-      }
-      return;
-    }
-    if (!dbg.isAttached()) dbg.attach('1.3');
-    await dbg.sendCommand('Emulation.setDeviceMetricsOverride', {
-      width: vp.width,
-      height: vp.height,
-      deviceScaleFactor: vp.dpr || 0,
-      mobile: Boolean(vp.mobile),
-      scale,
+  if (compare) {
+    pane.setVisible(false);
+    // While capturing for a blend, and under the overlay, every cell is stacked at the
+    // full area so the captures are as large as the stage that will show them.
+    const stacked = compare.blend || compare.capturing;
+    const grid = stacked ? null : gridLayout(compare.n, area, vp ? { width: vp.width, height: vp.height } : null, GAP);
+    cells.forEach((cell, i) => {
+      if (i >= compare.n) { cell.setVisible(false); return; }
+      const { bounds, scale } = layoutFor(vp, stacked ? area : grid.cells[i]);
+      cell.setBounds(bounds);
+      cell.setVisible(true);              // stays visible under the overlay so it can be captured
+      if (i === 0) currentScale = scale;
+      uaChanged = setViewportFor(cell.webContents, vp, scale) || uaChanged;
     });
-    await dbg.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: Boolean(vp.mobile), maxTouchPoints: 5 });
-    emulating = true;
-  } catch (e) {
-    debug('emulation failed:', e.message);
+    overlay.setBounds(area);
+    overlay.setVisible(compare.blend);
+  } else {
+    for (const cell of cells) cell.setVisible(false);
+    overlay.setVisible(false);
+    pane.setVisible(true);
+    const { bounds, scale } = layoutFor(vp, area);
+    pane.setBounds(bounds);
+    currentScale = scale;
+    uaChanged = setViewportFor(pane.webContents, vp, scale);
   }
+  debug('layout', describe(vp, currentScale), compare ? `compare ${compare.n} cells, ${compare.mode}${compare.blend ? ' (blend)' : ''}` : 'single', uaChanged ? '(user agent changed)' : '');
+  return uaChanged;
 }
 
 function setViewport(req) {
@@ -222,7 +291,7 @@ function setViewport(req) {
   const uaChanged = layout();
   const mobileFlipped = Boolean(before && before.mobile) !== Boolean(after && after.mobile);
   if (uaChanged || mobileFlipped) showItem(index, { force: true });
-  else { highlightRun++; runHighlight(); sendState(); }
+  else { highlightRun++; rehighlightAll(); sendState(); }
 }
 
 function viewportState() {
@@ -238,21 +307,6 @@ function viewportState() {
   };
 }
 
-async function snapshot(item) {
-  if (!SNAPSHOT_DIR) return;
-  try {
-    const fs = require('node:fs');
-    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
-    let img;
-    try { img = await pane.webContents.capturePage(); } catch { await delay(400); img = await pane.webContents.capturePage(); }
-    const file = path.join(SNAPSHOT_DIR, `${item.id}.png`);
-    fs.writeFileSync(file, img.toPNG());
-    debug('snapshot', file, `${img.getSize().width}x${img.getSize().height}`);
-    const ui = await panel.webContents.capturePage();
-    fs.writeFileSync(path.join(SNAPSHOT_DIR, `${item.id}.panel.png`), ui.toPNG());
-  } catch (e) { debug('snapshot failed', e.message); }
-}
-
 // ---------- task flow ----------
 
 function currentItem() {
@@ -264,6 +318,36 @@ function firstUnansweredFrom(start) {
     if (!results.data.answers[task.items[i].id]) return i;
   }
   return -1;
+}
+
+function summarizeHighlight() {
+  if (!lastHighlight) return null;
+  if (!lastHighlight.cells) return lastHighlight;
+  const item = currentItem();
+  const found = [], missing = [];
+  lastHighlight.cells.forEach((r, i) => {
+    if (!r || r.found === null) return;
+    (r.found ? found : missing).push(LETTERS[i]);
+  });
+  if (!found.length && !missing.length) return null;
+  const parts = [];
+  if (found.length) parts.push(`found in ${found.join(', ')}`);
+  if (missing.length) parts.push(`not in ${missing.join(', ')}`);
+  return { compare: true, found: found.length > 0, text: `${JSON.stringify(item.pane.focus)} ${parts.join(' · ')}`, focus: item && item.pane.focus };
+}
+
+function compareState() {
+  if (!compare) return null;
+  const item = currentItem();
+  return {
+    n: compare.n,
+    mode: compare.mode,
+    blend: compare.blend,
+    sync: compare.sync,
+    loaded: compare.loaded.size,
+    capturedAt: compare.capturedAt,
+    sources: item.pane.sources.map((s, i) => ({ letter: LETTERS[i], label: s.label, kind: s.kind, src: s.src })),
+  };
 }
 
 function sendState() {
@@ -279,25 +363,38 @@ function sendState() {
     answer: results.data.answers[item.id] || null,
     done: results.data.done,
     resultsFile: results.file,
-    highlight: lastHighlight,
+    highlight: summarizeHighlight(),
     pane: paneState,
     viewport: viewportState(),
+    compare: compareState(),
   });
 }
 
-function resolveTarget(item) {
+function localUrl(src) {
   const base = path.dirname(task.file);
+  return /^[a-z][a-z0-9+.-]*:/i.test(src) ? src : pathToFileURL(path.resolve(base, src)).href;
+}
+
+function imageViewerUrl(src, caption, badge, label) {
+  const u = pathToFileURL(path.join(__dirname, 'viewer', 'image.html'));
+  u.searchParams.set('src', localUrl(src));
+  if (caption) u.searchParams.set('caption', caption);
+  if (badge) { u.searchParams.set('badge', badge); u.searchParams.set('label', label || ''); }
+  return u.href;
+}
+
+function resolveTarget(item) {
   const p = item.pane;
-  const local = (src) => (/^[a-z][a-z0-9+.-]*:/i.test(src) ? src : pathToFileURL(path.resolve(base, src)).href);
   if (p.kind === 'url') return p.src;
-  if (p.kind === 'snapshot') return local(p.src);
-  if (p.kind === 'image') {
-    const u = pathToFileURL(path.join(__dirname, 'viewer', 'image.html'));
-    u.searchParams.set('src', local(p.src));
-    if (p.caption) u.searchParams.set('caption', p.caption);
-    return u.href;
-  }
+  if (p.kind === 'snapshot') return localUrl(p.src);
+  if (p.kind === 'image') return imageViewerUrl(p.src, p.caption);
   return 'about:blank';
+}
+
+function resolveSource(src, i) {
+  if (src.kind === 'url') return src.src;
+  if (src.kind === 'snapshot') return localUrl(src.src);
+  return imageViewerUrl(src.src, null, LETTERS[i], src.label);
 }
 
 async function showItem(i, { force = false } = {}) {
@@ -306,45 +403,228 @@ async function showItem(i, { force = false } = {}) {
   const item = currentItem();
   lastHighlight = null;
   highlightRun++;
-  const url = resolveTarget(item);
-  const wc = pane.webContents;
-  const uaChanged = layout();
-  debug('item', index + 1, 'of', task.items.length, item.id, '->', url);
-  if (force || uaChanged || wc.getURL() !== url) {
-    sendPane({ loading: true, error: null, url, title: '' });
-    wc.loadURL(url).catch(() => {});
+
+  if (item.pane.kind === 'compare') {
+    const n = item.pane.sources.length;
+    if (lastTaskMode !== item.pane.mode) { modeOverride = undefined; lastTaskMode = item.pane.mode; }
+    compare = {
+      n, mode: modeOverride || item.pane.mode, blend: false, capturing: false, sync: compare ? compare.sync : true,
+      loaded: new Set(), captureRun: 0, images: null, position: null, capturedAt: null,
+    };
+    ensureCells(n);
+    const uaChanged = layout();
+    debug('item', index + 1, 'of', task.items.length, item.id, `compare x${n}`, compare.mode);
+    item.pane.sources.forEach((src, k) => {
+      const url = resolveSource(src, k);
+      const wc = cells[k].webContents;
+      if (force || uaChanged || wc.getURL() !== url) wc.loadURL(url).catch(() => {});
+      else onLoaded(wc, k);
+    });
   } else {
-    runHighlight();
+    compare = null;
+    const url = resolveTarget(item);
+    const wc = pane.webContents;
+    const uaChanged = layout();
+    debug('item', index + 1, 'of', task.items.length, item.id, '->', url);
+    if (force || uaChanged || wc.getURL() !== url) {
+      sendPane({ loading: true, error: null, url, title: '' });
+      wc.loadURL(url).catch(() => {});
+    } else {
+      runHighlight(wc, -1);
+    }
   }
   sendState();
 }
 
-async function runHighlight() {
+async function onLoaded(wc, cellIndex) {
   const item = currentItem();
   if (!item) return;
-  const focus = item.pane && item.pane.focus;
-  const run = highlightRun;
-  if (!focus) { lastHighlight = { found: null }; sendState(); return; }
-  for (let t = 0; t < HIGHLIGHT_TRIES && run === highlightRun; t++) {
-    let res = null;
-    try { res = await pane.webContents.executeJavaScript(highlightScript(focus), true); } catch (e) { debug('highlight script error:', e.message); res = null; }
-    if (t === 0) debug('highlight first try', item.id, JSON.stringify(res));
-    if (run !== highlightRun) return;
-    if (res && res.found) { lastHighlight = res; debug('highlight', item.id, 'found', JSON.stringify(res.text)); sendState(); await probe(item); return; }
-    await delay(HIGHLIGHT_DELAY_MS);
+  if (cellIndex < 0) {
+    if (item.pane.kind !== 'compare') runHighlight(wc, -1);
+    return;
   }
-  if (run === highlightRun) { lastHighlight = { found: false, focus }; debug('highlight', item.id, 'NOT found:', focus); sendState(); await probe(item); }
+  const c = compare;
+  if (!c || cellIndex >= c.n) return;
+  c.loaded.add(cellIndex);
+  await installCellHooks(wc, cellIndex);
+  await runHighlight(wc, cellIndex);
+  if (compare !== c || c.loaded.size !== c.n) return;
+  if (process.env.RORSHACH_DEBUG_SCROLLTEST) await scrollSelfTest();
+  if (c.mode !== 'grid' && !c.blend) enterBlend();
 }
 
-// Debug only: report what the page believes about its viewport, and save a snapshot.
-async function probe(item) {
+// Debug only: scroll cell A by script and check that cell B followed.
+async function scrollSelfTest() {
+  try {
+    await cells[0].webContents.executeJavaScript('scrollTo(0, 600)', true);
+    await delay(700);
+    const y = await cells[1].webContents.executeJavaScript('scrollY', true);
+    debug('scroll sync self-test: A -> 600, B at', y, y > 0 ? 'OK' : 'FAILED');
+  } catch (e) { debug('scroll self-test failed', e.message); }
+}
+
+// A letter badge in the corner of each live cell, and a scroll listener that reports
+// through the DevTools binding so the other cells can follow.
+async function installCellHooks(wc, i) {
+  const src = currentItem().pane.sources[i];
+  if (src.kind !== 'url' && src.kind !== 'snapshot') return;
+  await ensureDebugger(wc);
+  const text = JSON.stringify(`${LETTERS[i]} · ${src.label}`);
+  const script = `(() => {
+    let b = document.getElementById('__rorshach_badge');
+    if (!b) { b = document.createElement('div'); b.id = '__rorshach_badge'; document.documentElement.appendChild(b); }
+    b.textContent = ${text};
+    b.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;padding:3px 8px;border-radius:4px;background:rgba(20,24,29,.85);color:#fff;font:600 12px system-ui,sans-serif;pointer-events:none';
+    if (!window.__rorshachScrollHook) {
+      window.__rorshachScrollHook = true;
+      addEventListener('scroll', () => { if (typeof __rorshachScroll === 'function') __rorshachScroll(scrollX + ',' + scrollY); }, { passive: true });
+    }
+  })()`;
+  try { await wc.executeJavaScript(script, true); } catch (e) { debug('cell hooks failed:', e.message); }
+}
+
+function onCellScroll(i, payload) {
+  if (!compare || !compare.sync || i < 0 || i >= compare.n) return;
+  const [x, y] = String(payload).split(',').map(Number);
+  const st = stateOf(cells[i].webContents);
+  if (st.applied && st.applied.x === x && st.applied.y === y) { st.applied = null; return; }  // our own scrollTo echoing back
+  for (let j = 0; j < compare.n; j++) {
+    if (j === i) continue;
+    const wc = cells[j].webContents;
+    stateOf(wc).applied = { x, y };
+    wc.executeJavaScript(`scrollTo(${x}, ${y})`, true).catch(() => {});
+  }
+}
+
+function setHighlight(cellIndex, res) {
+  if (cellIndex < 0) lastHighlight = res;
+  else {
+    if (!lastHighlight || !lastHighlight.cells) lastHighlight = { cells: [] };
+    lastHighlight.cells[cellIndex] = res;
+  }
+  sendState();
+}
+
+async function runHighlight(wc, cellIndex) {
+  const item = currentItem();
+  if (!item) return null;
+  const focus = item.pane.focus;
+  const kind = cellIndex < 0 ? item.pane.kind : item.pane.sources[cellIndex].kind;
+  const tag = cellIndex < 0 ? item.id : `${item.id}/${LETTERS[cellIndex]}`;
+  const run = highlightRun;
+  if (!focus || (kind !== 'url' && kind !== 'snapshot')) { setHighlight(cellIndex, { found: null }); return null; }
+  for (let t = 0; t < HIGHLIGHT_TRIES && run === highlightRun; t++) {
+    let res = null;
+    try { res = await wc.executeJavaScript(highlightScript(focus), true); } catch (e) { debug('highlight script error:', e.message); }
+    if (run !== highlightRun) return null;
+    if (res && res.found) { setHighlight(cellIndex, res); debug('highlight', tag, 'found', JSON.stringify(res.text)); await probe(wc, tag); return res; }
+    await delay(HIGHLIGHT_DELAY_MS);
+  }
+  if (run === highlightRun) { setHighlight(cellIndex, { found: false, focus }); debug('highlight', tag, 'NOT found:', focus); await probe(wc, tag); }
+  return null;
+}
+
+function rehighlightAll() {
+  if (compare) cells.slice(0, compare.n).forEach((cell, k) => runHighlight(cell.webContents, k));
+  else runHighlight(pane.webContents, -1);
+}
+
+// ---------- compare: blend modes ----------
+
+function captureDir() {
+  const dir = path.join(app.getPath('temp'), 'rorshach-captures', String(process.pid));
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+async function enterBlend() {
+  const c = compare;
+  const item = currentItem();
+  if (!c || !item) return;
+  const run = ++c.captureRun;
+  if (!c.blend) { c.capturing = true; layout(); await delay(450); }   // let the pages reflow at full size
+  if (compare !== c || run !== c.captureRun) return;
+  const images = [];
+  for (let k = 0; k < c.n; k++) {
+    const src = item.pane.sources[k];
+    const base = { letter: LETTERS[k], label: src.label };
+    if (src.kind === 'image') { images.push({ ...base, url: localUrl(src.src) }); continue; }
+    try {
+      const img = await cells[k].webContents.capturePage();
+      if (compare !== c || run !== c.captureRun) return;
+      const file = path.join(captureDir(), `${Date.now()}-${k}.png`);
+      fs.writeFileSync(file, img.toPNG());
+      images.push({ ...base, url: pathToFileURL(file).href });
+    } catch (e) {
+      debug('capture failed', LETTERS[k], e.message);
+      images.push({ ...base, url: '' });
+    }
+  }
+  for (let t = 0; t < 10 && !overlayReady; t++) await delay(200);
+  if (compare !== c || run !== c.captureRun) return;
+  c.images = images;
+  c.capturing = false;
+  c.blend = true;
+  c.capturedAt = new Date().toISOString();
+  overlay.webContents.send('compare', { mode: c.mode, images, position: c.position });
+  layout();
+  overlay.webContents.focus();
+  debug('blend', c.mode, images.map((i) => `${i.letter}:${i.url ? 'ok' : 'FAILED'}`).join(' '));
+  sendState();
+  if (SNAPSHOT_DIR) { await delay(1500); if (compare === c) await snapshot(`${item.id}.blend`, overlay.webContents); }
+}
+
+function exitBlend() {
+  if (!compare) return;
+  compare.blend = false;
+  layout();
+  panel.webContents.focus();
+  sendState();
+}
+
+function setMode(mode) {
+  if (!compare) return;
+  modeOverride = mode;
+  compare.mode = mode;
+  if (mode === 'grid') { exitBlend(); return; }
+  if (compare.blend && compare.images) {
+    overlay.webContents.send('compare', { mode, images: compare.images, position: null });
+    overlay.webContents.focus();
+    sendState();
+  } else if (compare.loaded.size === compare.n) {
+    enterBlend();
+  } else {
+    sendState();                          // blend starts once every cell has loaded
+  }
+}
+
+async function snapshot(tag, wc) {
+  if (!SNAPSHOT_DIR) return;
+  try {
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    let img;
+    try { img = await wc.capturePage(); } catch { await delay(400); img = await wc.capturePage(); }
+    const file = path.join(SNAPSHOT_DIR, `${tag.replace(/[\\/:]/g, '_')}.png`);
+    fs.writeFileSync(file, img.toPNG());
+    debug('snapshot', file, `${img.getSize().width}x${img.getSize().height}`);
+    const ui = await panel.webContents.capturePage();
+    fs.writeFileSync(path.join(SNAPSHOT_DIR, `${currentItem().id}.panel.png`), ui.toPNG());
+    if (compare && compare.blend) {
+      const ov = await overlay.webContents.capturePage();
+      fs.writeFileSync(path.join(SNAPSHOT_DIR, `${currentItem().id}.blend-${compare.mode}.png`), ov.toPNG());
+    }
+  } catch (e) { debug('snapshot failed', e.message); }
+}
+
+// Debug only: report what the page believes about its viewport, and save snapshots.
+async function probe(wc, tag) {
   if (!process.env.RORSHACH_DEBUG) return;
   try {
-    const r = await pane.webContents.executeJavaScript(
+    const r = await wc.executeJavaScript(
       '({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio, coarse: matchMedia("(pointer: coarse)").matches, ua: navigator.userAgent.slice(0, 70) })', true);
-    debug('page sees', JSON.stringify(r));
+    debug('page sees', tag, JSON.stringify(r));
   } catch (e) { debug('probe failed', e.message); }
-  await snapshot(item);
+  await snapshot(tag, wc);
 }
 
 async function openTask(file, resultsFile) {
@@ -364,6 +644,7 @@ async function openTask(file, resultsFile) {
 // ---------- ipc ----------
 
 ipcMain.on('panel-ready', () => { sendState(); sendPane({}); });
+ipcMain.on('overlay-ready', () => { overlayReady = true; });
 
 ipcMain.on('answer', (_e, { value, label, note }) => {
   const item = currentItem();
@@ -373,7 +654,8 @@ ipcMain.on('answer', (_e, { value, label, note }) => {
   const viewport = vp
     ? { name: vp.name, width: vp.width, height: vp.height, mobile: vp.mobile, scale: Math.round(currentScale * 1000) / 1000 }
     : { name: 'fit' };
-  results.answer(item.id, { value, label, note: note || '', index, viewport });
+  const extra = compare ? { compare: { mode: compare.mode, position: compare.position, capturedAt: compare.capturedAt } } : {};
+  results.answer(item.id, { value, label, note: note || '', index, viewport, ...extra });
   let next = firstUnansweredFrom(index + 1);
   if (next === -1) next = firstUnansweredFrom(0);
   if (next === -1) { results.finish(); sendState(); return; }
@@ -396,19 +678,35 @@ ipcMain.on('nav', (_e, to) => {
 });
 
 ipcMain.on('open-external', () => {
-  const url = pane.webContents.getURL();
-  if (/^https?:/i.test(url)) shell.openExternal(url);
+  const item = currentItem();
+  if (!item) return;
+  const urls = item.pane.kind === 'compare'
+    ? item.pane.sources.filter((s) => s.kind === 'url').map((s) => s.src)
+    : [pane.webContents.getURL()];
+  for (const url of urls) if (/^https?:/i.test(url)) shell.openExternal(url);
 });
-ipcMain.on('rehighlight', () => { highlightRun++; runHighlight(); });
-ipcMain.on('viewport', (_e, req) => {
-  try { setViewport(req); } catch (e) { debug('viewport rejected', e.message); sendState(); }
-});
+ipcMain.on('rehighlight', () => { highlightRun++; rehighlightAll(); });
 ipcMain.on('reload', () => showItem(index, { force: true }));
 ipcMain.on('reveal-results', () => { if (results) shell.showItemInFolder(results.file); });
 ipcMain.on('open-task', async () => {
   const file = await pickTaskFile();
   if (file) openTask(file, null);
 });
+ipcMain.on('viewport', (_e, req) => {
+  try { setViewport(req); } catch (e) { debug('viewport rejected', e.message); sendState(); }
+});
+ipcMain.on('compare', (_e, req) => {
+  if (!compare || !req) return;
+  if (req.action === 'mode') setMode(req.mode);
+  else if (req.action === 'sync') { compare.sync = Boolean(req.on); sendState(); }
+  else if (req.action === 'recapture') { if (compare.mode === 'grid') setMode('fade'); else enterBlend(); }
+});
+ipcMain.on('overlay-hotkey', (_e, key) => { panel.webContents.send('hotkey', key); });
+ipcMain.on('overlay-action', (_e, name) => {
+  if (name === 'grid') setMode('grid');
+  else if (name === 'recapture') enterBlend();
+});
+ipcMain.on('overlay-position', (_e, p) => { if (compare) compare.position = p; });
 
 // ---------- lifecycle ----------
 
@@ -421,4 +719,7 @@ app.whenReady().then(async () => {
   if (!ok) app.quit();
 });
 
+app.on('will-quit', () => {
+  try { fs.rmSync(path.join(app.getPath('temp'), 'rorshach-captures', String(process.pid)), { recursive: true, force: true }); } catch {}
+});
 app.on('window-all-closed', () => app.quit());

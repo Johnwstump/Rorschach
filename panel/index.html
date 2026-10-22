@@ -32,6 +32,12 @@
       <p id="pane-url" class="url mono" title=""></p>
       <p id="pane-error" class="error" hidden></p>
 
+      <div class="vp cmp" id="cmp" role="group" aria-label="Compare" hidden>
+        <div class="vp-head"><span class="label">Compare</span><span id="cmp-status" class="chip"></span></div>
+        <div id="cmp-buttons" class="vp-buttons"></div>
+        <ul id="cmp-sources" class="cmp-sources"></ul>
+      </div>
+
       <div class="vp" role="group" aria-label="Viewport">
         <div class="vp-head"><span class="label">Viewport <span class="muted">(V)</span></span><span id="vp-status" class="chip"></span></div>
         <div id="vp-buttons" class="vp-buttons"></div>
@@ -74,7 +80,7 @@
     </section>
 
     <footer class="hints">
-      <span><b>1–9</b> answer</span><span><b>N</b> note</span><span><b>⌫</b> back</span><span><b>→</b> skip</span><span><b>H</b> find</span><span><b>R</b> reload</span><span><b>O</b> browser</span><span><b>V</b> viewport</span><span><b>Alt+key</b> while the page has focus</span>
+      <span><b>1–9</b> answer</span><span><b>N</b> note</span><span><b>⌫</b> back</span><span><b>→</b> skip</span><span><b>H</b> find</span><span><b>R</b> reload</span><span><b>O</b> browser</span><span><b>V</b> viewport</span><span><b>G/F/W</b> grid/fade/wipe</span><span><b>S</b> sync scroll</span><span><b>C</b> recapture</span><span><b>Alt+key</b> while the page has focus</span>
     </footer>
   </div>
   <script src="panel.js"></script>

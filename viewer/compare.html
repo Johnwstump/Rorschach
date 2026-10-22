@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Compare</title>
+  <style>
+    :root { --bg: #14181d; --ink: #e6eaee; --muted: #98a3ad; --line: #3a444f; --accent: #8cb4f0; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; user-select: none; }
+    body { display: grid; grid-template-rows: 1fr auto; }
+    .stage { position: relative; overflow: hidden; outline: none; }
+    .stage img { position: absolute; top: 0; left: 0; pointer-events: none; display: none; }
+    .stage img.on { display: block; }
+    .badge { position: absolute; z-index: 3; padding: 3px 8px; border-radius: 4px; background: rgba(20,24,29,0.85); color: #fff; font-weight: 600; font-size: 12px; pointer-events: none; white-space: nowrap; }
+    .badge b { color: var(--accent); margin-right: 4px; }
+    .divider { position: absolute; top: 0; bottom: 0; width: 0; z-index: 4; cursor: col-resize; touch-action: none; }
+    .divider::before { content: ""; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); }
+    .divider .grip { position: absolute; top: 50%; left: -14px; width: 28px; height: 28px; border-radius: 50%; background: #fff; color: #111; display: grid; place-items: center; font-size: 13px; transform: translateY(-50%); box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+    .divider.active .grip { background: var(--accent); }
+    .divider .hit { position: absolute; top: 0; bottom: 0; left: -10px; width: 20px; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: #1c2229; border-top: 1px solid var(--line); min-height: 44px; }
+    .bar .mode { font-weight: 600; text-transform: capitalize; }
+    .bar .hint { color: var(--muted); }
+    .bar input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+    .bar .spacer { flex: 1; }
+    .bar .pos { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line); background: #262e37; color: var(--ink); padding: 6px 10px; }
+    button:hover { border-color: var(--accent); }
+    .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); z-index: 5; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage" tabindex="0"><div class="empty" id="empty">Capturing…</div></div>
+  <div class="bar" id="bar">
+    <span class="mode" id="mode"></span>
+    <span class="hint" id="hint"></span>
+    <input id="slider" type="range" min="0" max="1" step="0.01" value="0" hidden aria-label="Blend position">
+    <span class="pos" id="pos"></span>
+    <span class="spacer"></span>
+    <button id="recapture" type="button" title="Capture the pages again (C)">Recapture</button>
+    <button id="grid" type="button" title="Back to the grid (G)">Grid</button>
+  </div>
+  <script src="compare.js"></script>
+</body>
+</html>
