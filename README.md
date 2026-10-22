@@ -176,7 +176,11 @@ answer, which is the thing to watch for if something is waiting on the review.
 | `S` | Compare items: toggle synced scrolling in the grid |
 | `C` | Compare items: capture the pages again for fade and wipe |
 | `Space`, `←` `→`, `Tab` | In fade or wipe: blink to the next source, move the slider or divider, pick the next divider |
-| `Alt` + any of the above | Same, while the page itself has keyboard focus |
+| `Alt` + any of the above | Same, while you are typing in a text field on the page |
+
+Letter and digit keys work wherever the keyboard focus is, including inside the
+reviewed page, unless a text field on that page is focused; arrows and Backspace stay
+with the page there, since pages scroll with them.
 | `F12` | Developer tools for the pane |
 
 Set `RORSHACH_DEBUG=1` to print item loads, highlight results, what the page reports

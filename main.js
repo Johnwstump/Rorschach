@@ -51,9 +51,13 @@ let lastTaskMode = null;
 const wcState = new WeakMap();
 function stateOf(wc) {
   let s = wcState.get(wc);
-  if (!s) { s = { live: false, emulating: false, bound: false, wanted: { vp: null, scale: 1 }, applied: null }; wcState.set(wc, s); }
+  if (!s) { s = { live: false, emulating: false, bound: false, wanted: { vp: null, scale: 1 }, applied: null, editing: false }; wcState.set(wc, s); }
   return s;
 }
+
+// Keys the panel owns. A page view forwards these when no text field in it is focused,
+// so hotkeys work wherever the keyboard focus happens to be.
+const HOTKEY = /^[0-9a-z]$/i;
 
 // ---------- arguments ----------
 
@@ -101,6 +105,7 @@ function createContentView(cellIndex) {
   });
   wc.on('did-start-loading', () => {
     st.live = true;
+    st.editing = false;
     applyEmulation(wc);
     if (isPane) sendPane({ loading: true, error: null });
   });
@@ -112,14 +117,19 @@ function createContentView(cellIndex) {
     debug('load failed', url, desc, code);
     if (isPane) sendPane({ loading: false, error: `${desc} (${code})`, url });
   });
-  // Alt+<key> works even while the page has keyboard focus.
+  // Hotkeys reach the panel from here too: always with Alt, and bare when the page has
+  // no text field focused (arrows and Backspace stay with the page, which scrolls with them).
   wc.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || !input.alt || input.control || input.meta) return;
+    if (input.type !== 'keyDown' || input.control || input.meta) return;
+    if (!input.alt && (st.editing || !HOTKEY.test(input.key))) return;
     panel.webContents.send('hotkey', input.key);
     event.preventDefault();
   });
   wc.debugger.on('message', (_e, method, params) => {
-    if (method === 'Runtime.bindingCalled' && params.name === '__rorshachScroll') onCellScroll(cellIndex, params.payload);
+    if (method !== 'Runtime.bindingCalled' || params.name !== '__rorshach') return;
+    const [type, value] = String(params.payload).split(':', 2);
+    if (type === 'scroll') onCellScroll(cellIndex, value);
+    else if (type === 'focus') st.editing = value === '1';
   });
   wc.debugger.on('detach', () => { st.emulating = false; st.bound = false; });
   return view;
@@ -159,19 +169,32 @@ function createWindow() {
       event.preventDefault();
     }
   });
+  panel.webContents.once('did-finish-load', () => panel.webContents.focus());
   panel.webContents.loadFile(path.join(__dirname, 'panel', 'index.html'));
   overlay.webContents.loadFile(path.join(__dirname, 'viewer', 'compare.html'));
 }
 
-// Cells are created on demand and kept; the overlay is re-added so it stays on top.
+// Cells are created on demand and kept. A new cell lands on top of the overlay, so the
+// overlay is re-added after one; re-adding views otherwise is avoided because it can
+// drop the window's keyboard focus.
 function ensureCells(n) {
+  let added = false;
   while (cells.length < n) {
     const view = createContentView(cells.length);
     cells.push(view);
     win.contentView.addChildView(view);
+    added = true;
   }
-  win.contentView.removeChildView(overlay);
-  win.contentView.addChildView(overlay);
+  if (added) {
+    win.contentView.removeChildView(overlay);
+    win.contentView.addChildView(overlay);
+  }
+}
+
+// Where the keyboard should be after an item or mode change: the overlay while
+// blending, otherwise the panel.
+function focusControls() {
+  (compare && compare.blend ? overlay : panel).webContents.focus();
 }
 
 function sendPane(patch) {
@@ -194,7 +217,7 @@ async function ensureDebugger(wc) {
   st.bound = true;
   try {
     await wc.debugger.sendCommand('Runtime.enable');
-    await wc.debugger.sendCommand('Runtime.addBinding', { name: '__rorshachScroll' });
+    await wc.debugger.sendCommand('Runtime.addBinding', { name: '__rorshach' });
   } catch (e) { debug('binding failed:', e.message); }
 }
 
@@ -433,6 +456,7 @@ async function showItem(i, { force = false } = {}) {
       runHighlight(wc, -1);
     }
   }
+  focusControls();
   sendState();
 }
 
@@ -440,47 +464,74 @@ async function onLoaded(wc, cellIndex) {
   const item = currentItem();
   if (!item) return;
   if (cellIndex < 0) {
-    if (item.pane.kind !== 'compare') runHighlight(wc, -1);
+    if (item.pane.kind === 'compare') return;
+    await installPageHooks(wc, null);
+    runHighlight(wc, -1);
     return;
   }
   const c = compare;
   if (!c || cellIndex >= c.n) return;
   c.loaded.add(cellIndex);
-  await installCellHooks(wc, cellIndex);
+  await installPageHooks(wc, `${LETTERS[cellIndex]} · ${item.pane.sources[cellIndex].label}`);
   await runHighlight(wc, cellIndex);
   if (compare !== c || c.loaded.size !== c.n) return;
-  if (process.env.RORSHACH_DEBUG_SCROLLTEST) await scrollSelfTest();
-  if (c.mode !== 'grid' && !c.blend) enterBlend();
+  if (process.env.RORSHACH_DEBUG_SELFTEST && !c.selfTested) { c.selfTested = true; c.testing = true; await selfTests(); c.testing = false; }
+  if (compare === c && !c.testing && c.mode !== 'grid' && !c.blend) enterBlend();
 }
 
-// Debug only: scroll cell A by script and check that cell B followed.
-async function scrollSelfTest() {
+// Debug only. Scroll cell A by script and check that B followed; then send key
+// presses into cell A's page and check they reach the panel only when no text field
+// is focused there.
+async function selfTests() {
+  const a = cells[0].webContents;
   try {
-    await cells[0].webContents.executeJavaScript('scrollTo(0, 600)', true);
+    await a.executeJavaScript('scrollTo(0, 600)', true);
     await delay(700);
     const y = await cells[1].webContents.executeJavaScript('scrollY', true);
-    debug('scroll sync self-test: A -> 600, B at', y, y > 0 ? 'OK' : 'FAILED');
-  } catch (e) { debug('scroll self-test failed', e.message); }
+    debug('self-test scroll sync: A -> 600, B at', y, y > 0 ? 'OK' : 'FAILED');
+
+    const answered = () => Object.keys(results.data.answers).length;
+    const before = answered();
+    a.focus();                            // as a click into the page would
+    await delay(200);
+    const focused = await a.executeJavaScript("(() => { const i = document.querySelector('input[type=search], input[type=text], input, textarea'); if (!i) return false; i.focus(); return document.activeElement === i; })()", true);
+    await delay(300);
+    a.sendInputEvent({ type: 'keyDown', keyCode: '1' });
+    await delay(400);
+    debug('self-test key while editing:', focused ? (answered() === before ? 'ignored OK' : 'FAILED, answered') : 'no field to focus');
+    await a.executeJavaScript('document.activeElement && document.activeElement.blur()', true);
+    await delay(300);
+    a.sendInputEvent({ type: 'keyDown', keyCode: '1' });
+    await delay(400);
+    debug('self-test key from page:', answered() > before ? 'answered OK' : 'FAILED, not answered');
+  } catch (e) { debug('self-test failed', e.message); }
 }
 
-// A letter badge in the corner of each live cell, and a scroll listener that reports
-// through the DevTools binding so the other cells can follow.
-async function installCellHooks(wc, i) {
-  const src = currentItem().pane.sources[i];
-  if (src.kind !== 'url' && src.kind !== 'snapshot') return;
+// Hooks run inside a live page: a letter badge in the corner (compare cells), a scroll
+// listener so sibling cells can follow, and focus listeners that say whether a text
+// field is being edited, so bare hotkeys can be forwarded the rest of the time.
+// Pages the app serves itself (the image viewer) are left alone.
+async function installPageHooks(wc, badgeText) {
+  if (!/^(https?|file):/i.test(wc.getURL()) || wc.getURL().includes('/viewer/image.html')) return;
   await ensureDebugger(wc);
-  const text = JSON.stringify(`${LETTERS[i]} · ${src.label}`);
   const script = `(() => {
+    const text = ${JSON.stringify(badgeText)};
     let b = document.getElementById('__rorshach_badge');
-    if (!b) { b = document.createElement('div'); b.id = '__rorshach_badge'; document.documentElement.appendChild(b); }
-    b.textContent = ${text};
-    b.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;padding:3px 8px;border-radius:4px;background:rgba(20,24,29,.85);color:#fff;font:600 12px system-ui,sans-serif;pointer-events:none';
-    if (!window.__rorshachScrollHook) {
-      window.__rorshachScrollHook = true;
-      addEventListener('scroll', () => { if (typeof __rorshachScroll === 'function') __rorshachScroll(scrollX + ',' + scrollY); }, { passive: true });
-    }
+    if (text) {
+      if (!b) { b = document.createElement('div'); b.id = '__rorshach_badge'; document.documentElement.appendChild(b); }
+      b.textContent = text;
+      b.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;padding:3px 8px;border-radius:4px;background:rgba(20,24,29,.85);color:#fff;font:600 12px system-ui,sans-serif;pointer-events:none';
+    } else if (b) b.remove();
+    if (window.__rorshachHooked) return;
+    window.__rorshachHooked = true;
+    const send = (m) => { if (typeof __rorshach === 'function') __rorshach(m); };
+    addEventListener('scroll', () => send('scroll:' + scrollX + ',' + scrollY), { passive: true });
+    const editable = (el) => !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    addEventListener('focusin', (e) => send('focus:' + (editable(e.target) ? '1' : '0')), true);
+    addEventListener('focusout', () => send('focus:0'), true);
+    send('focus:' + (editable(document.activeElement) ? '1' : '0'));
   })()`;
-  try { await wc.executeJavaScript(script, true); } catch (e) { debug('cell hooks failed:', e.message); }
+  try { await wc.executeJavaScript(script, true); } catch (e) { debug('page hooks failed:', e.message); }
 }
 
 function onCellScroll(i, payload) {
@@ -568,7 +619,7 @@ async function enterBlend() {
   c.capturedAt = new Date().toISOString();
   overlay.webContents.send('compare', { mode: c.mode, images, position: c.position });
   layout();
-  overlay.webContents.focus();
+  focusControls();
   debug('blend', c.mode, images.map((i) => `${i.letter}:${i.url ? 'ok' : 'FAILED'}`).join(' '));
   sendState();
   if (SNAPSHOT_DIR) { await delay(1500); if (compare === c) await snapshot(`${item.id}.blend`, overlay.webContents); }
@@ -578,7 +629,7 @@ function exitBlend() {
   if (!compare) return;
   compare.blend = false;
   layout();
-  panel.webContents.focus();
+  focusControls();
   sendState();
 }
 
@@ -589,7 +640,7 @@ function setMode(mode) {
   if (mode === 'grid') { exitBlend(); return; }
   if (compare.blend && compare.images) {
     overlay.webContents.send('compare', { mode, images: compare.images, position: null });
-    overlay.webContents.focus();
+    focusControls();
     sendState();
   } else if (compare.loaded.size === compare.n) {
     enterBlend();
