@@ -49,32 +49,29 @@ function badge(letter, label, x, y) {
   b.style.left = `${x}px`;
   b.style.top = `${y}px`;
   stage.appendChild(b);
+  return b;
 }
 
 // ---------- wipe ----------
+// The dividers and badges are built once per render and then moved in place, so the
+// element being dragged (which holds the pointer capture) is never replaced mid-drag.
+
+let wipeEls = { badges: [], dividers: [] };
 
 function renderWipe() {
   clearStage();
   const n = imgs.length;
   if (dividers.length !== n - 1) dividers = Array.from({ length: n - 1 }, (_, i) => (i + 1) / n);
-  const bounds = [0, ...dividers, 1];
+  wipeEls = { badges: [], dividers: [] };
   imgs.forEach((img, i) => {
     img.classList.add('on');
     img.style.opacity = '';
     img.style.zIndex = '1';
-    const left = frame.x + bounds[i] * frame.w;
-    const right = frame.x + bounds[i + 1] * frame.w;
-    const imgL = parseFloat(img.style.left), imgW = parseFloat(img.style.width);
-    // clip-path insets are relative to the image box.
-    const insetL = Math.max(0, left - imgL);
-    const insetR = Math.max(0, (imgL + imgW) - right);
-    img.style.clipPath = `inset(0 ${insetR}px 0 ${insetL}px)`;
-    badge(data.images[i].letter, data.images[i].label, left + 8, frame.y + 8);
+    wipeEls.badges.push(badge(data.images[i].letter, data.images[i].label, 0, frame.y + 8));
   });
-  dividers.forEach((f, i) => {
+  dividers.forEach((_f, i) => {
     const d = document.createElement('div');
-    d.className = `divider${i === active ? ' active' : ''}`;
-    d.style.left = `${frame.x + f * frame.w}px`;
+    d.className = 'divider';
     const hit = document.createElement('div'); hit.className = 'hit';
     const grip = document.createElement('div'); grip.className = 'grip'; grip.textContent = '⇔';
     d.append(hit, grip);
@@ -83,16 +80,42 @@ function renderWipe() {
       d.setPointerCapture(e.pointerId);
       const left = stage.getBoundingClientRect().left;
       const move = (ev) => setDivider(i, (ev.clientX - left - frame.x) / frame.w);
-      const up = () => { d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up); report(); };
+      const up = () => {
+        d.removeEventListener('pointermove', move);
+        d.removeEventListener('pointerup', up);
+        d.removeEventListener('pointercancel', up);
+        report();
+      };
       d.addEventListener('pointermove', move);
       d.addEventListener('pointerup', up);
+      d.addEventListener('pointercancel', up);
       e.preventDefault();
     });
     stage.appendChild(d);
+    wipeEls.dividers.push(d);
   });
   $('hint').textContent = n === 2
     ? 'Drag the divider. ← → nudge it, Shift for fine steps.'
     : `${n - 1} dividers. Drag any; ← → nudge the highlighted one, Tab picks the next.`;
+  updateWipe();
+}
+
+function updateWipe() {
+  const bounds = [0, ...dividers, 1];
+  imgs.forEach((img, i) => {
+    const left = frame.x + bounds[i] * frame.w;
+    const right = frame.x + bounds[i + 1] * frame.w;
+    const imgL = parseFloat(img.style.left), imgW = parseFloat(img.style.width);
+    // clip-path insets are relative to the image box.
+    const insetL = Math.max(0, left - imgL);
+    const insetR = Math.max(0, (imgL + imgW) - right);
+    img.style.clipPath = `inset(0 ${insetR}px 0 ${insetL}px)`;
+    if (wipeEls.badges[i]) wipeEls.badges[i].style.left = `${left + 8}px`;
+  });
+  wipeEls.dividers.forEach((d, i) => {
+    d.style.left = `${frame.x + dividers[i] * frame.w}px`;
+    d.classList.toggle('active', i === active);
+  });
   $('pos').textContent = dividers.map((f) => `${Math.round(f * 100)}%`).join(' · ');
 }
 
@@ -100,7 +123,7 @@ function setDivider(i, f) {
   const lo = i > 0 ? dividers[i - 1] + 0.01 : 0;
   const hi = i < dividers.length - 1 ? dividers[i + 1] - 0.01 : 1;
   dividers[i] = Math.min(hi, Math.max(lo, f));
-  renderWipe();
+  updateWipe();
 }
 
 // ---------- fade ----------
@@ -183,7 +206,7 @@ document.addEventListener('keydown', (e) => {
     if (data.mode === 'wipe') {
       if (e.key === 'ArrowLeft') { setDivider(active, dividers[active] - (fine ? 0.005 : 0.03)); report(); e.preventDefault(); return; }
       if (e.key === 'ArrowRight') { setDivider(active, dividers[active] + (fine ? 0.005 : 0.03)); report(); e.preventDefault(); return; }
-      if (e.key === 'Tab' && dividers.length > 1) { active = (active + 1) % dividers.length; renderWipe(); e.preventDefault(); return; }
+      if (e.key === 'Tab' && dividers.length > 1) { active = (active + 1) % dividers.length; updateWipe(); e.preventDefault(); return; }
     } else {
       if (e.key === 'ArrowLeft') { setT(t - (fine ? 0.02 : 0.1)); report(); e.preventDefault(); return; }
       if (e.key === 'ArrowRight') { setT(t + (fine ? 0.02 : 0.1)); report(); e.preventDefault(); return; }

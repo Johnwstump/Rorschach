@@ -623,6 +623,27 @@ async function enterBlend() {
   debug('blend', c.mode, images.map((i) => `${i.letter}:${i.url ? 'ok' : 'FAILED'}`).join(' '));
   sendState();
   if (SNAPSHOT_DIR) { await delay(1500); if (compare === c) await snapshot(`${item.id}.blend`, overlay.webContents); }
+  if (process.env.RORSHACH_DEBUG_SELFTEST && c.mode === 'wipe' && compare === c) await dragSelfTest();
+}
+
+// Debug only: drag the first wipe divider 300px to the right with synthetic mouse
+// events and check that it followed the whole way.
+async function dragSelfTest() {
+  const ov = overlay.webContents;
+  await delay(1500);
+  try {
+    const r = await ov.executeJavaScript("(() => { const g = document.querySelector('.divider .grip'); if (!g) return null; const b = g.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, pos: document.getElementById('pos').textContent }; })()", true);
+    if (!r) { debug('self-test drag: no divider found'); return; }
+    ov.sendInputEvent({ type: 'mouseDown', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    for (let i = 1; i <= 20; i++) {
+      ov.sendInputEvent({ type: 'mouseMove', x: r.x + i * 15, y: r.y, button: 'left', modifiers: ['leftButtonDown'] });
+      await delay(16);
+    }
+    ov.sendInputEvent({ type: 'mouseUp', x: r.x + 300, y: r.y, button: 'left', clickCount: 1 });
+    await delay(300);
+    const after = await ov.executeJavaScript("document.getElementById('pos').textContent", true);
+    debug('self-test drag: before', JSON.stringify(r.pos), 'after', JSON.stringify(after), r.pos !== after ? 'OK' : 'FAILED');
+  } catch (e) { debug('self-test drag failed', e.message); }
 }
 
 function exitBlend() {
