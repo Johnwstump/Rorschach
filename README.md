@@ -1,4 +1,4 @@
-# Rorshach
+# Rorschach
 
 A review station. You hand it a queue of things to look at (web pages, images, saved
 snapshots) and a question to answer about each one. It shows each item in a browser
@@ -8,7 +8,7 @@ go to a JSON file as you work.
 It was built for a chore that kept coming up: an automated check flags 150 things,
 and a person has to look at each one and say "real problem" or "not a problem". Doing
 that with a spreadsheet and a browser tab means copying URLs, hunting for the right
-row on each page, and typing the verdict back into a cell. Rorshach turns each of
+row on each page, and typing the verdict back into a cell. Rorschach turns each of
 those into a glance and a keypress.
 
 It pairs well with an AI assistant: the assistant writes the task file, you do the
@@ -25,7 +25,7 @@ npx electron . path/to/task.json            # your own task
 npx electron . task.json --out answers.json # choose where results go
 ```
 
-Without a task file argument, Rorshach asks you to pick one. Results default to
+Without a task file argument, Rorschach asks you to pick one. Results default to
 `<task name>.results.json` next to the task file. If that file already exists, the
 review resumes at the first unanswered item.
 
@@ -183,15 +183,15 @@ reviewed page, unless a text field on that page is focused; arrows and Backspace
 with the page there, since pages scroll with them.
 | `F12` | Developer tools for the pane |
 
-Set `RORSHACH_DEBUG=1` to print item loads, highlight results, what the page reports
-about its viewport, and answers to stdout. Add `RORSHACH_SNAPSHOT_DIR=<folder>` to
+Set `RORSCHACH_DEBUG=1` to print item loads, highlight results, what the page reports
+about its viewport, and answers to stdout. Add `RORSCHACH_SNAPSHOT_DIR=<folder>` to
 also save a PNG of the pane for each item once its highlight settles.
 
 ## How the pane is sandboxed
 
 The reviewed content runs in its own Electron `WebContentsView` with the Chromium
 sandbox on, no Node integration, no preload script, and a separate persistent session
-(`persist:rorshach-pane`), so logins survive between runs but the page can't reach the
+(`persist:rorschach-pane`), so logins survive between runs but the page can't reach the
 control panel or the file system. Popups open inside the pane. The highlight is a
 small script run in the page that changes inline styles and nothing else.
 

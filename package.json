@@ -1,5 +1,5 @@
 {
-  "name": "rorshach",
+  "name": "rorschach",
   "version": "0.1.0",
   "description": "A review station: walk through a queue of web pages or images, answer a question about each, and write the answers to a file.",
   "main": "main.js",
@@ -11,8 +11,8 @@
     "dist": "electron-builder"
   },
   "build": {
-    "appId": "dev.rorshach.app",
-    "productName": "Rorshach",
+    "appId": "dev.rorschach.app",
+    "productName": "Rorschach",
     "files": [
       "main.js",
       "preload.js",

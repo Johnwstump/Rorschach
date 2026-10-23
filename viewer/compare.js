@@ -5,7 +5,7 @@
 // a timeline A→B→C with a crossfade between neighbours (Space blinks between whole
 // sources), and wipe gives N sources N-1 dividers, each region showing the next one.
 
-const api = window.rorshachCompare;
+const api = window.rorschachCompare;
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
 const slider = $('slider');

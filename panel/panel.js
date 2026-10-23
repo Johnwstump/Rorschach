@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const api = window.rorshach;
+const api = window.rorschach;
 
 let state = null;
 let noteItemId = null;   // which item the textarea currently belongs to

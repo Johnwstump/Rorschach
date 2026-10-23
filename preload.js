@@ -2,7 +2,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('rorshach', {
+contextBridge.exposeInMainWorld('rorschach', {
   ready: () => ipcRenderer.send('panel-ready'),
   answer: (a) => ipcRenderer.send('answer', a),
   clearAnswer: () => ipcRenderer.send('clear-answer'),

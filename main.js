@@ -14,12 +14,12 @@ const { LETTERS, GAP, gridLayout } = require('./lib/compare');
 const PANEL_WIDTH = 420;
 const HIGHLIGHT_TRIES = 12;      // pages that render late get a few chances
 const HIGHLIGHT_DELAY_MS = 600;
-const PANE_PARTITION = 'persist:rorshach-pane';
+const PANE_PARTITION = 'persist:rorschach-pane';
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-// RORSHACH_DEBUG=1 prints item loads, highlight results and answers to stdout.
-const debug = process.env.RORSHACH_DEBUG ? (...a) => console.log('[rorshach]', ...a) : () => {};
-const SNAPSHOT_DIR = process.env.RORSHACH_SNAPSHOT_DIR || null;
+// RORSCHACH_DEBUG=1 prints item loads, highlight results and answers to stdout.
+const debug = process.env.RORSCHACH_DEBUG ? (...a) => console.log('[rorschach]', ...a) : () => {};
+const SNAPSHOT_DIR = process.env.RORSCHACH_SNAPSHOT_DIR || null;
 
 let win = null;
 let panel = null;      // the control panel (our UI)
@@ -63,7 +63,7 @@ const HOTKEY = /^[0-9a-z]$/i;
 
 function parseArgs(argv) {
   // dev:      electron . task.json --out results.json
-  // packaged: Rorshach.exe task.json --out results.json
+  // packaged: Rorschach.exe task.json --out results.json
   const args = argv.slice(app.isPackaged ? 1 : 2).filter((a) => a !== '.' && !a.startsWith('--inspect'));
   const out = { taskFile: null, resultsFile: null };
   for (let i = 0; i < args.length; i++) {
@@ -126,7 +126,7 @@ function createContentView(cellIndex) {
     event.preventDefault();
   });
   wc.debugger.on('message', (_e, method, params) => {
-    if (method !== 'Runtime.bindingCalled' || params.name !== '__rorshach') return;
+    if (method !== 'Runtime.bindingCalled' || params.name !== '__rorschach') return;
     const [type, value] = String(params.payload).split(':', 2);
     if (type === 'scroll') onCellScroll(cellIndex, value);
     else if (type === 'focus') st.editing = value === '1';
@@ -141,7 +141,7 @@ function createWindow() {
     height: 980,
     minWidth: 900,
     minHeight: 600,
-    title: 'Rorshach',
+    title: 'Rorschach',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#14181d' : '#f4f5f7',
   });
 
@@ -217,7 +217,7 @@ async function ensureDebugger(wc) {
   st.bound = true;
   try {
     await wc.debugger.sendCommand('Runtime.enable');
-    await wc.debugger.sendCommand('Runtime.addBinding', { name: '__rorshach' });
+    await wc.debugger.sendCommand('Runtime.addBinding', { name: '__rorschach' });
   } catch (e) { debug('binding failed:', e.message); }
 }
 
@@ -475,7 +475,7 @@ async function onLoaded(wc, cellIndex) {
   await installPageHooks(wc, `${LETTERS[cellIndex]} · ${item.pane.sources[cellIndex].label}`);
   await runHighlight(wc, cellIndex);
   if (compare !== c || c.loaded.size !== c.n) return;
-  if (process.env.RORSHACH_DEBUG_SELFTEST && !c.selfTested) { c.selfTested = true; c.testing = true; await selfTests(); c.testing = false; }
+  if (process.env.RORSCHACH_DEBUG_SELFTEST && !c.selfTested) { c.selfTested = true; c.testing = true; await selfTests(); c.testing = false; }
   if (compare === c && !c.testing && c.mode !== 'grid' && !c.blend) enterBlend();
 }
 
@@ -516,15 +516,15 @@ async function installPageHooks(wc, badgeText) {
   await ensureDebugger(wc);
   const script = `(() => {
     const text = ${JSON.stringify(badgeText)};
-    let b = document.getElementById('__rorshach_badge');
+    let b = document.getElementById('__rorschach_badge');
     if (text) {
-      if (!b) { b = document.createElement('div'); b.id = '__rorshach_badge'; document.documentElement.appendChild(b); }
+      if (!b) { b = document.createElement('div'); b.id = '__rorschach_badge'; document.documentElement.appendChild(b); }
       b.textContent = text;
       b.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;padding:3px 8px;border-radius:4px;background:rgba(20,24,29,.85);color:#fff;font:600 12px system-ui,sans-serif;pointer-events:none';
     } else if (b) b.remove();
-    if (window.__rorshachHooked) return;
-    window.__rorshachHooked = true;
-    const send = (m) => { if (typeof __rorshach === 'function') __rorshach(m); };
+    if (window.__rorschachHooked) return;
+    window.__rorschachHooked = true;
+    const send = (m) => { if (typeof __rorschach === 'function') __rorschach(m); };
     addEventListener('scroll', () => send('scroll:' + scrollX + ',' + scrollY), { passive: true });
     const editable = (el) => !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     addEventListener('focusin', (e) => send('focus:' + (editable(e.target) ? '1' : '0')), true);
@@ -583,7 +583,7 @@ function rehighlightAll() {
 // ---------- compare: blend modes ----------
 
 function captureDir() {
-  const dir = path.join(app.getPath('temp'), 'rorshach-captures', String(process.pid));
+  const dir = path.join(app.getPath('temp'), 'rorschach-captures', String(process.pid));
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -623,7 +623,7 @@ async function enterBlend() {
   debug('blend', c.mode, images.map((i) => `${i.letter}:${i.url ? 'ok' : 'FAILED'}`).join(' '));
   sendState();
   if (SNAPSHOT_DIR) { await delay(1500); if (compare === c) await snapshot(`${item.id}.blend`, overlay.webContents); }
-  if (process.env.RORSHACH_DEBUG_SELFTEST && c.mode === 'wipe' && compare === c) await dragSelfTest();
+  if (process.env.RORSCHACH_DEBUG_SELFTEST && c.mode === 'wipe' && compare === c) await dragSelfTest();
 }
 
 // Debug only: drag the first wipe divider 300px to the right with synthetic mouse
@@ -690,7 +690,7 @@ async function snapshot(tag, wc) {
 
 // Debug only: report what the page believes about its viewport, and save snapshots.
 async function probe(wc, tag) {
-  if (!process.env.RORSHACH_DEBUG) return;
+  if (!process.env.RORSCHACH_DEBUG) return;
   try {
     const r = await wc.executeJavaScript(
       '({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio, coarse: matchMedia("(pointer: coarse)").matches, ua: navigator.userAgent.slice(0, 70) })', true);
@@ -707,7 +707,7 @@ async function openTask(file, resultsFile) {
     return false;
   }
   results = Results.open(resultsFile || defaultResultsPath(task.file), task);
-  win.setTitle(`${task.title} · Rorshach`);
+  win.setTitle(`${task.title} · Rorschach`);
   const start = firstUnansweredFrom(0);
   await showItem(start === -1 ? 0 : start, { force: true });
   return true;
@@ -792,6 +792,6 @@ app.whenReady().then(async () => {
 });
 
 app.on('will-quit', () => {
-  try { fs.rmSync(path.join(app.getPath('temp'), 'rorshach-captures', String(process.pid)), { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(path.join(app.getPath('temp'), 'rorschach-captures', String(process.pid)), { recursive: true, force: true }); } catch {}
 });
 app.on('window-all-closed', () => app.quit());
