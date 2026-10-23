@@ -1,3 +1,5 @@
+<p align="center"><img src="build/icon.svg" width="128" alt="Rorschach: an R mirrored into an ink blot"></p>
+
 # Rorschach
 
 A review station. You hand it a queue of things to look at (web pages, images, saved
@@ -201,6 +203,12 @@ small script run in the page that changes inline styles and nothing else.
 npm install --save-dev electron-builder
 npm run dist
 ```
+
+The icon in `build/` is generated: `npm run icon` converts the R from the Anton
+typeface (OFL, fetched on first run) into a path, writes `build/icon.svg`, then renders
+the PNGs and the Windows ICO with Electron's own Chromium so the blot filter looks the
+same as in the app. The blot's seed, roughness and bleed live at the top of
+`scripts/icon-svg.js`.
 
 ## License
 

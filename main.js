@@ -142,6 +142,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'Rorschach',
+    icon: path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#14181d' : '#f4f5f7',
   });
 

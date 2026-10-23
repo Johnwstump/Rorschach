@@ -8,17 +8,21 @@
   "scripts": {
     "start": "electron .",
     "sample": "electron . samples/sample-task.json",
+    "icon": "node scripts/icon-svg.js && electron scripts/icon-raster.js",
     "dist": "electron-builder"
   },
   "build": {
     "appId": "dev.rorschach.app",
     "productName": "Rorschach",
+    "icon": "build/icon.png",
     "files": [
       "main.js",
       "preload.js",
       "lib/**",
       "panel/**",
       "viewer/**",
+      "build/icon.ico",
+      "build/icon.png",
       "package.json"
     ],
     "win": {
@@ -32,6 +36,7 @@
     }
   },
   "devDependencies": {
-    "electron": "^45.0.0"
+    "electron": "^45.0.0",
+    "opentype.js": "^2.0.0"
   }
 }
