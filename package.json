@@ -2,14 +2,27 @@
   "name": "rorschach",
   "version": "0.1.0",
   "description": "A review station: walk through a queue of web pages or images, answer a question about each, and write the answers to a file.",
-  "main": "main.js",
+  "author": "John Stump",
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Johnwstump/Rorschach.git"
+  },
+  "homepage": "https://github.com/Johnwstump/Rorschach#readme",
+  "bugs": {
+    "url": "https://github.com/Johnwstump/Rorschach/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "main.js",
   "scripts": {
     "start": "electron .",
     "sample": "electron . samples/sample-task.json",
     "icon": "node scripts/icon-svg.js && electron scripts/icon-raster.js",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "node --test test/*.test.js"
   },
   "build": {
     "appId": "dev.rorschach.app",

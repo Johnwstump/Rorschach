@@ -7,4 +7,4 @@ local/
 Thumbs.db
 .claude/
 build/fonts/
-build/.icon-render.html
+build/.icon-render-*.html

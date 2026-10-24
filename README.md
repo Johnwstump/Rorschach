@@ -2,6 +2,8 @@
 
 # Rorschach
 
+[![CI](https://github.com/Johnwstump/Rorschach/actions/workflows/ci.yml/badge.svg)](https://github.com/Johnwstump/Rorschach/actions/workflows/ci.yml)
+
 A review station. You hand it a queue of things to look at (web pages, images, saved
 snapshots) and a question to answer about each one. It shows each item in a browser
 pane, scrolls to the part that matters, and puts your answer buttons beside it. Answers
@@ -179,11 +181,11 @@ answer, which is the thing to watch for if something is waiting on the review.
 | `C` | Compare items: capture the pages again for fade and wipe |
 | `Space`, `←` `→`, `Tab` | In fade or wipe: blink to the next source, move the slider or divider, pick the next divider |
 | `Alt` + any of the above | Same, while you are typing in a text field on the page |
+| `F12` | Developer tools for the pane |
 
 Letter and digit keys work wherever the keyboard focus is, including inside the
 reviewed page, unless a text field on that page is focused; arrows and Backspace stay
 with the page there, since pages scroll with them.
-| `F12` | Developer tools for the pane |
 
 Set `RORSCHACH_DEBUG=1` to print item loads, highlight results, what the page reports
 about its viewport, and answers to stdout. Add `RORSCHACH_SNAPSHOT_DIR=<folder>` to
@@ -197,18 +199,28 @@ sandbox on, no Node integration, no preload script, and a separate persistent se
 control panel or the file system. Popups open inside the pane. The highlight is a
 small script run in the page that changes inline styles and nothing else.
 
+## Development
+
+```bash
+npm test          # unit tests for lib/ (task loading, results, viewports, grid layout)
+```
+
+The tests use Node's built-in runner and need no extra packages. The same command runs
+on every push through GitHub Actions, and Dependabot opens one grouped pull request a
+month for npm and Actions updates.
+
+The icon in `build/` is generated: `npm run icon` converts the R from the Anton
+typeface (OFL, fetched on first run) into a path, writes `build/icon.svg`, then renders
+the PNGs, the Windows ICO and the GitHub social preview card with Electron's own
+Chromium so the blot filter looks the same as in the app. The blot's seed, roughness
+and bleed live at the top of `scripts/icon-svg.js`.
+
 ## Build installers
 
 ```bash
 npm install --save-dev electron-builder
 npm run dist
 ```
-
-The icon in `build/` is generated: `npm run icon` converts the R from the Anton
-typeface (OFL, fetched on first run) into a path, writes `build/icon.svg`, then renders
-the PNGs and the Windows ICO with Electron's own Chromium so the blot filter looks the
-same as in the app. The blot's seed, roughness and bleed live at the top of
-`scripts/icon-svg.js`.
 
 ## License
 

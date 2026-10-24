@@ -1,0 +1,18 @@
+# Keeps dependencies current without a weekly pile of pull requests: one grouped
+# PR a month for npm, one for the Actions used in CI.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      all:
+        patterns: ["*"]
