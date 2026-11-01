@@ -49,7 +49,7 @@
     }
   },
   "devDependencies": {
-    "electron": "^45.0.0",
+    "electron": "^45.1.0",
     "opentype.js": "^2.0.0"
   }
 }
